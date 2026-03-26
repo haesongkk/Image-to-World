@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+
+Grounded-SAM-2/
+
+shap-e/
+shap_e_model_cache/
+
+pretrained/
+tmp/

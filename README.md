@@ -1,6 +1,6 @@
 # Image-to-World
 
-단일 이미지를 입력받아 장면 내 객체를 분리하고, 깊이와 객체별 3D 복원을 활용해 최종적으로 **3D 월드 기반 장면 정보**로 재구성하는 프로젝트입니다. 본 프로젝트는 하나의 거대한 end-to-end 생성 모델을 직접 학습하는 방식보다, **모듈형 파이프라인**을 구성해 각 단계를 독립적으로 검증하고 점진적으로 고도화하는 방향을 채택합니다. 이 접근은 최근 single-image scene reconstruction 연구 중 **Deep Prior Assembly**, **Gen3DSR**, **3D-RE-GEN**과 가장 가깝습니다. 
+단일 이미지를 입력받아 장면 내 객체를 분리하고, 깊이와 객체별 3D 복원을 활용해 최종적으로 **3D 월드 기반 장면 정보**로 재구성하는 프로젝트입니다. 본 프로젝트는 하나의 거대한 end-to-end 생성 모델을 직접 학습하는 방식보다, **모듈형 파이프라인**을 구성해 각 단계를 독립적으로 검증하고 점진적으로 고도화하는 방향을 채택합니다. 
 
 ## 1. 프로젝트 개요
 
@@ -14,181 +14,223 @@
 - 객체별 3D 자산 생성
 - 객체를 장면 좌표계에 배치
 - 하나의 3D scene으로 조립
-- 추후 Unity / Blender / Unreal 등에서 활용 가능한 형태로 출력
+- 추후 obj + mtl / fbx / glTF 등 활용 가능한 형태로 출력
 
-## 2. 목표
+---
 
-### 최종 목표
+## 2. 파이프라인
 
-단일 이미지를 입력받아 장면 전체를 **3D 월드 기반 scene representation**으로 재구성하는 시스템을 구현하는 것입니다. 여기에는 객체별 3D 형태, 상대적 배치, 배경 또는 구조물 정보가 포함됩니다. 이 문제는 최근에도 활발히 연구 중이며, Deep Prior Assembly는 zero-shot single-image scene reconstruction을, Gen3DSR는 모듈형 divide-and-conquer reconstruction을, 3D-RE-GEN은 textured object와 background를 포함한 editable reconstruction을 목표로 합니다.
+### 01_tag
 
-### 현재 목표
+입력 이미지에서 장면에 존재하는 객체 후보 태그를 추출합니다.
 
-초기 단계에서는 하나의 통합 모델을 새로 학습하기보다, **작동 가능한 프로토타입 파이프라인**을 완성하는 것을 목표로 합니다. 즉, 각 단계를 독립적으로 테스트하고, 앞 단계의 출력이 다음 단계의 입력으로 실제 연결되는지를 검증하는 것이 우선입니다. Gen3DSR는 전체 시스템의 end-to-end training 없이 모듈을 결합하는 방식을 강조하고, Deep Prior Assembly도 task-specific data-driven training 없이 priors를 조립하는 방향을 제시합니다.
+### 02_mask
 
-## 3. 왜 파이프라인 방식으로 접근하는가
+태그를 바탕으로 객체 인스턴스를 검출하고, 객체별 마스크 및 crop 이미지를 생성합니다.
 
-본 프로젝트의 원래 큰 목표는 분명히 “단일 이미지 → 3D 월드”입니다. 다만 현재 시점에서 그 목표를 바로 하나의 통합 모델 학습 문제로 가져가면, 프로젝트 전체가 모델 재현과 학습 성패에 과도하게 종속될 수 있습니다. 반면 파이프라인 방식은 각 단계를 독립적으로 제어할 수 있고, 부분 성공도 결과물로 남기기 쉽습니다. 이는 Deep Prior Assembly가 장면 복원을 여러 하위 문제로 분해하고, Gen3DSR가 scene-level understanding과 object-level reconstruction을 나누며, 3D-RE-GEN이 asset detection, reconstruction, placement를 조합하는 구조와도 맞닿아 있습니다.
+### 03_inpaint
 
-즉, 본 프로젝트는 다음과 같은 철학을 가집니다.
+부분적으로만 보이는 객체를 더 완전한 형태로 보완하기 위해 inpainting을 수행합니다.
 
-- 문제를 한 번에 풀지 않고 하위 문제로 나눈다.
-- 각 하위 문제에 강한 모델이나 기술을 배치한다.
-- 전체를 모듈형으로 설계해 교체 가능하게 만든다.
-- 최종적으로는 더 통합된 scene generation 방향으로 확장 가능성을 열어둔다.
+### 04_asset
 
-## 4. 전체 파이프라인
+보완된 객체 이미지를 바탕으로 객체별 3D 어셋(mesh)을 생성합니다.
 
-본 프로젝트의 기본 파이프라인은 다음과 같습니다.
+### 05_depth
 
-**입력 이미지 → 객체 / 배경 분리 → depth 추정 → 객체별 가려진 부분 보완 → 객체별 3D 생성 → 카메라 / ground / depth 기반 배치 → 최종 scene assembly**
+원본 이미지의 depth map을 추정하여 장면 내 상대적 거리 정보를 얻습니다.
 
-이 흐름은 Deep Prior Assembly의 zero-shot scene reconstruction 파이프라인, Gen3DSR의 scene-first / object-second divide-and-conquer 구조, 3D-RE-GEN의 object + background reconstruction 구조를 종합한 방향입니다. Deep Prior Assembly는 Grounded-SAM, Stable Diffusion, OpenCLIP, ShapE, Omnidata를 조합하고, Gen3DSR는 depth·semantic 정보 추출 후 object reconstruction과 scene composition을 수행하며, 3D-RE-GEN은 instance segmentation, context-aware inpainting, 2D-to-3D asset creation, constrained optimization을 결합합니다. 
+### 06_transform
 
-## 5. 구현 예정 모듈
+객체의 2D 위치, depth, 3D 어셋 정보를 이용해 장면 내 배치 좌표를 계산합니다.
 
-### 5-1. 객체 / 배경 분리 모듈
+### 07_assemble
 
-이 단계의 목표는 입력 이미지에서 **객체 인스턴스 마스크**와 **배경 영역**을 안정적으로 얻는 것입니다.
-주요 후보로는 **SAM 2**, **Grounding DINO 1.5**, **Grounded SAM 2**, **BiRefNet**을 고려합니다. SAM 2는 promptable segmentation foundation model이며, Grounding DINO 1.5는 open-set / open-world object detection 계열의 강력한 후보입니다. Grounded SAM 2는 Grounding DINO와 SAM 2를 결합해 open-vocabulary detection과 segmentation을 함께 수행할 수 있습니다. 배경 분리나 고해상도 foreground extraction 쪽에서는 BiRefNet도 유력한 후보입니다. 
+각 객체 어셋을 최종 장면 좌표계에 배치하여 하나의 scene mesh로 합칩니다.
 
-**우선 후보**
+---
 
-- Grounded SAM 2
-- Grounding DINO 1.5 + SAM 2
-- BiRefNet
+## 3. 현재까지 수행한 작업 (DONE)
 
-### 5-2. Depth 추정 모듈
+현재는 **최소 end-to-end 프로토타입이 실제로 연결된 상태**입니다.
 
-이 단계의 목표는 장면의 앞뒤 관계, 상대적 거리감, 배치 기준이 되는 깊이 정보를 얻는 것입니다.
-우선 후보로는 **Depth Pro**, **Depth Anything V2**, **Omnidata**를 둡니다. Depth Pro는 zero-shot metric monocular depth estimation을 표방하며, absolute-scale depth를 intrinsics 없이 예측할 수 있다고 보고합니다. Depth Anything V2는 V1 대비 더 세밀하고 robust한 depth를 제공하는 최근 강한 후보입니다. Omnidata는 Deep Prior Assembly에서 실제로 사용된 기준선 성격의 depth prior입니다.
+### 전체 파이프라인 구성
 
-**우선 후보**
+- 태그 추출부터 scene assembly까지 전체 흐름이 실제 코드로 연결되어 있음
+- 각 단계별 중간 결과물을 저장하고 확인할 수 있는 구조를 갖춤
+- 객체별 결과를 기반으로 후속 단계 입력을 생성하는 형태로 구성됨
+- 사용 방식:
+  - 모듈형 파이프라인 구조
+  - 단계별 중간 산출물 저장 기반 디버깅
+  - 후속 단계가 이전 단계 결과를 입력으로 받는 순차 처리 방식
 
-- Depth Pro
-- Depth Anything V2
-- Omnidata
+### 01_tag
 
-### 5-3. 카메라 / 기하 추정 모듈
+- 입력 이미지에서 태그를 추출하는 기능 구현
+- 사용 기술:
+  - **RAM++ (Recognize Anything Model Plus)** 기반 태그 추출
+- 객체가 아닌 배경성 태그가 너무 많이 포함되는 문제를 완화하기 위해 **임시 필터링** 적용
+- 현재는 `room`, `floor`, `wall` 등 배경성 태그를 일부 제외하는 식의 임시 대응을 사용 중
+- 현재 이슈:
+  - 객체가 아닌 사물도 태그로 추가되는 문제
+  - 간혹 객체를 잘 인식하지 못하는 문제
+  - 우선 배경 분리 이후 다시 검토 필요
 
-이 단계의 목표는 객체를 월드 좌표계에 놓기 위한 **camera parameters**, **ground plane**, **scene geometry hints**를 얻는 것입니다. Gen3DSR는 scene을 holistic하게 먼저 분석해 depth와 semantic 정보를 얻은 뒤 object reconstruction으로 넘어가고, 3D-RE-GEN은 precise camera recovery와 estimated ground plane에 기반한 4-DoF differentiable optimization을 사용합니다. 따라서 본 프로젝트도 단순 depth map만이 아니라, **camera / ground 추정**을 scene assembly의 핵심 요소로 다룰 예정입니다.
+### 02_mask
 
-**초기 구현 방향**
+- 태그 기반 객체 마스크 추출 파이프라인 구현
+- 사용 기술:
+  - **Grounding DINO** 기반 텍스트 조건 객체 검출
+  - **SAM2 (Segment Anything Model 2)** 기반 객체 마스크 생성
+- 객체별 mask, crop, RGBA crop 등을 저장하는 구조 확보
+- 전반적인 결과는 나쁘지 않은 수준
+- 현재 이슈:
+  - 상위 단계인 tag 품질에 영향을 받기 때문에 명확한 평가는 아직 어려움
 
-- pinhole camera + depth 기반 간단한 배치
-- ground plane 추정 기반 정렬
-- 이후 differentiable alignment로 확장
+### 03_inpaint
 
-### 5-4. 객체별 가려진 부분 보완 / Amodal Completion 모듈
+- 객체 crop을 확장하여 보완된 이미지를 생성하는 기능 구현
+- 사용 기술:
+  - **Stable Diffusion XL Inpainting**
+- 결과물 자체는 나쁘지 않은 수준
+- 현재 이슈:
+  - 속도가 매우 느려 전체 파이프라인 병목 중 하나로 판단됨
 
-이 단계의 목표는 부분적으로만 보이는 객체를 **더 완전한 2D 입력**으로 보완하여 이후 3D 생성 품질을 높이는 것입니다. Deep Prior Assembly는 Stable Diffusion과 OpenCLIP 기반 filtering을 사용하고, Gen3DSR는 partially occluded object completion을 포함하며, 3D-RE-GEN은 context-aware generative inpainting을 핵심 단계로 둡니다.
+### 04_asset
 
-실험 후보로는 **SDXL Inpainting**, **Stable Diffusion Inpainting**, **LaMa**를 우선 고려합니다. Diffusers 문서는 Stable Diffusion Inpainting과 SDXL Inpainting을 대표적 inpainting 계열로 제시하며, LaMa는 large-mask inpainting에서 여전히 강한 baseline입니다.
+- 객체 이미지로부터 3D 어셋을 생성하는 기능 구현
+- 사용 기술:
+  - **Shap-E** 기반 2D 이미지 → 3D mesh 생성
+- 생성된 객체의 전체적인 형상은 대체로 나쁘지 않은 편
+- 축 보정 관련 실험도 일부 반영됨
+- 현재 이슈:
+  - mesh 품질이 낮고 노이즈가 많음
+  - 폴리곤 수가 지나치게 많음
+  - 텍스처까지 입힐 수 있는 더 나은 3D 어셋 생성 모델이 필요함
 
-**우선 후보**
+### 05_depth
 
-- SDXL Inpainting
-- Stable Diffusion Inpainting
-- LaMa
+- depth map 추정 기능 구현
+- 사용 기술:
+  - **Depth Anything V2**
+- 결과 이미지 저장 가능
+- 현재는 정량 평가 없이 육안 확인 위주로 검토 중
+- 현재 이슈:
+  - 깊이 추정 결과 이미지를 눈으로 확인할 수밖에 없어 평가가 모호함
+  - 다만 현재로서는 큰 문제는 없어 보임
+
+### 06_transform
+
+- depth와 객체 정보를 활용해 장면 내 배치 좌표를 계산하는 기능 구현
+- 사용 기술:
+  - 객체 bounding box / mask 기반 2D 위치 정보 활용
+  - depth map 기반 상대 거리 추정
+  - pseudo camera / pinhole 가정 기반의 초기 3D 배치 계산
+  - 객체 크기와 depth를 결합한 heuristic scale 추정
+- 객체들이 대략적인 위치에 놓이는 수준까지는 도달함
+- transform 결과를 기준으로 얼추 맞는 배치가 나오는지 확인 가능한 상태
+- 현재 이슈:
+  - 완성도를 높이려면 많은 수정이 필요함
+  - 위치는 얼추 맞지만 명확하지 않음
+  - 좌표계 일관성, 위치 정확도, 배치 로직 정교화가 필요함
+
+### 07_assemble
 
-### 5-5. 객체별 2D → 3D 생성 모듈
+- transform 결과와 객체 어셋을 이용해 하나의 scene mesh로 합치는 기능 구현
+- 사용 기술:
+  - OBJ 단위 mesh 로드 및 병합
+  - 객체별 transform 적용
+  - scene 단위 mesh export
+  - 객체별 색상 구분을 통한 시각화용 출력
+- 최종 장면 형태로 결과를 묶어 확인할 수 있는 단계까지 연결됨
+- scene 단위 결과물을 출력할 수 있는 최소 구조는 확보됨
+- 현재 이슈:
+  - 최종 배치 결과의 완성도가 아직 충분히 높지 않음
+  - transform 단계와의 책임 분리가 더 명확해질 필요가 있음
+  - 축 보정, 배치 반영 방식, scene 출력 품질 개선이 필요함
 
-이 단계의 목표는 객체 crop 또는 보완된 객체 이미지를 입력으로 받아 **3D object asset**을 생성하는 것입니다. Deep Prior Assembly는 이 단계에서 **ShapE**를 사용했고, 3D-RE-GEN은 보다 일반적인 2D-to-3D asset creation을 포함합니다.
+### 시각화 및 디버깅 기반 확보
 
-최근 강한 후보로는 **TRELLIS**, **Hunyuan3D-2**, 그리고 기준선으로 **ShapE**를 고려합니다. TRELLIS는 text 또는 image prompt를 받아 meshes를 포함한 다양한 3D 자산 포맷을 생성하는 large 3D asset generation model입니다. Hunyuan3D-2는 bare mesh 생성 후 texture map을 합성하는 2-stage pipeline을 채택하고 있어 파이프라인형 프로젝트와 잘 맞습니다.
+- 단계별 결과물을 직접 확인하면서 품질을 판단할 수 있는 구조가 마련됨
+- 현재 프로젝트는 “품질 개선을 위한 기반”까지는 확보된 상태로 볼 수 있음
+- 사용 방식:
+  - 단계별 이미지 저장
+  - 객체별 중간 산출물 저장
+  - 최종 scene 결과물 export 및 외부 툴 확인 가능 구조
 
-**우선 후보**
+---
 
-- TRELLIS
-- Hunyuan3D-2
-- Baseline: ShapE
+## 4. 앞으로 수행할 작업 (TODO)
 
-### 5-6. 객체 정렬 / 월드 좌표 배치 모듈
+앞으로의 작업은 크게 **정확도 개선**, **속도 개선**, **결과물 품질 개선**, **구조 정리**로 나눌 수 있습니다.
 
-이 단계의 목표는 생성된 객체를 원본 이미지 장면 기준의 **위치, 방향, 크기**에 맞게 배치하는 것입니다. Deep Prior Assembly는 location, orientation, scale을 최적화해 장면에 배치하고, Gen3DSR는 monocular depth guides를 사용해 scene composition을 수행하며, 3D-RE-GEN은 ground plane에 정렬되는 4-DoF differentiable optimization을 사용합니다.
+### A. 태그 및 마스크 품질 개선
 
-**구현 방향**
+- 객체 태그와 장면 태그를 분리 저장하는 구조로 개선
+- 단순 필터링이 아니라 배경/구조물 처리까지 고려한 태그 체계 정리
+- 배경 분리 이후 tag 단계 결과를 다시 검증
+- tag 결과 품질이 개선된 뒤 mask 단계 성능 재평가
 
-- depth-guided placement
-- ground-plane alignment
-- 필요 시 differentiable rendering / optimization 적용
-- collision 완화와 물리적으로 어색한 배치 감소
+### B. inpainting 속도 및 품질 개선
 
-### 5-7. 배경 / 구조물 복원 모듈
+- 현재 inpainting 병목 원인 분석
+- 필요 시 더 빠른 설정 또는 대체 모델 검토
+- 마스크 설계 방식 개선
+- 객체 유형별 프롬프트 또는 생성 전략 개선
+- 여러 실험을 빠르게 반복할 수 있도록 추론 시간 단축
 
-이 단계의 목표는 객체들만 따로 있는 상태가 아니라, 장면을 장면답게 보이게 하는 **배경과 구조물**을 함께 복원하는 것입니다. 3D-RE-GEN은 개별 객체뿐 아니라 **reconstructed background**를 함께 생성해 object placement를 공간적으로 제약하고, lighting과 simulation의 기반으로 활용한다고 설명합니다.
+### C. 3D 어셋 품질 개선
 
-초기 버전에서는 이 모듈을 단순화하여:
+- mesh 노이즈 제거 후처리 실험
+- 과도한 폴리곤 수를 줄이기 위한 decimation / remeshing 검토
+- 더 높은 품질의 2D→3D 생성 모델 조사 및 교체 실험
+- 최종적으로는 텍스처까지 포함 가능한 모델 도입 검토
 
-- floor / wall plane만 추정하거나
-- 배경을 별도 구조물 mesh로 처리하거나
-- 배경을 scene anchor 용도로만 사용하는 방식
-으로 시작할 수 있습니다.
+### D. depth 검증 체계 보강
 
-### 5-8. 최종 Scene Assembly / 출력 포맷 모듈
+- 현재 depth 결과를 단순 이미지 확인에만 의존하지 않도록 개선
+- 객체 위치 및 배치 결과와 함께 depth 품질을 간접 검증하는 방식 도입
+- 필요 시 depth 통계값, 객체별 depth 샘플링 방식 개선
 
-최종 단계의 목표는 객체와 배경을 하나의 **3D scene representation**으로 묶고, 이후 다른 툴에서 사용할 수 있도록 정리하는 것입니다. Gen3DSR는 triangle mesh 기반 scene components를, 3D-RE-GEN은 editable, modifiable scene을 강조합니다. 따라서 본 프로젝트도 최종 출력은 **mesh 중심**으로 두되, 초기에는 객체별 mesh + metadata(JSON) 조합으로 시작하고 이후 textured scene 형태로 확장할 계획입니다.
+### E. transform / assemble 정교화
 
-## 6. 관련 연구
+- 좌표계 정의를 명확히 문서화
+- transform 단계와 assemble 단계의 책임 분리
+- 객체 위치 계산 기준 개선
+- scale 추정 방식 개선
+- 축 반전 및 회전 보정 로직 정리
+- 결과 장면을 더 자연스럽게 보이도록 배치 로직 개선
 
-### 핵심 참고 논문
+### F. 배경 / 구조물 복원 추가
 
-- **Zero-Shot Scene Reconstruction from Single Images with Deep Prior Assembly**
-단일 이미지 장면 복원을 여러 하위 문제로 분해하고, Grounded-SAM, Stable Diffusion, OpenCLIP, ShapE, Omnidata 같은 deep priors를 zero-shot manner로 조립하는 연구입니다. 본 프로젝트의 **핵심 철학**에 가장 가깝습니다. 
-- **Gen3DSR: Generalizable 3D Scene Reconstruction via Divide and Conquer from a Single View**
-scene을 holistic하게 먼저 보고 depth와 semantic 정보를 얻은 뒤, object-level reconstruction을 수행하고 다시 scene으로 조립하는 divide-and-conquer 파이프라인입니다. 본 프로젝트의 **전체 구조 설계도**에 가장 가깝습니다.
-- **3D-RE-GEN: 3D Reconstruction of Indoor Scenes with a Generative Framework**
-single image를 textured 3D objects와 background로 재구성하고, instance segmentation, context-aware generative inpainting, 2D-to-3D asset creation, constrained optimization을 통해 editable scene을 만드는 compositional framework입니다. 본 프로젝트의 **실전 구현 감각**과 **결과물 지향성**에 가장 가깝습니다.
+- floor / wall plane 추정
+- 배경 또는 구조물 mesh 생성 방향 검토
+- 객체만 있는 scene이 아니라 실제 장면 구조를 갖춘 reconstruction으로 확장
 
-### 부분 참고 논문
+### G. 코드 구조 및 유지보수성 개선
 
-- **Diorama**
-CAD retrieval과 architecture-aware scene modeling 관점에서 참고할 가치가 있지만, 본 프로젝트는 기존 CAD를 검색해 조립하는 방향보다 객체를 직접 생성하는 방향에 더 가깝기 때문에 핵심 축으로 두지는 않습니다.
-- **DepR**
-depth-guided object reconstruction과 instance-level diffusion 관점에서 객체별 3D 생성 모듈을 고도화할 때 참고할 수 있습니다. 다만 프로젝트 전체 구조보다는 **객체 복원 모듈의 강화**에 더 가깝습니다.
+- 파일별 역할 재정리
+- 하드코딩 최소화
+- 설정 파일 분리
+- 디버그/시각화/핵심 로직 분리
+- 중간 산출물 관리 체계 정리
 
-### 방향성 참고
+---
 
-- **PixARMesh**
-단일 이미지에서 실내 scene mesh를 unified autoregressive model로 직접 생성하는 흥미로운 방향입니다. 다만 본 프로젝트 초기 단계에서는 재현·학습·디버깅 난도가 높아, 현재는 메인 구현축보다는 **장기적 비전**으로만 참고합니다.
+## 5. 테스트 이미지 및 참고 자료
 
-## 7. 현재 진행 상황
+### 테스트 이미지
 
-현재까지 다음 내용을 중심으로 조사 및 방향 정리를 진행했습니다.
+- [pixabay simple room image](https://pixabay.com/ko/photos/%ec%9d%b8%ed%85%8c%eb%a6%ac%ec%96%b4-%eb%94%94%ec%9e%90%ec%9d%b8-%ed%98%84%eb%8c%80%ec%a0%81%ec%9d%b8-%ec%8a%a4%ed%83%80%ec%9d%bc-4467768/)
 
-- 단일 이미지 기반 3D scene reconstruction 관련 최근 논문 조사
-- 파이프라인형 접근과 통합 생성형 접근 비교
-- 핵심 참고 논문 3개 선정
-  - Deep Prior Assembly
-  - Gen3DSR
-  - 3D-RE-GEN
-- 객체 분리, depth, inpainting, 2D→3D asset generation 후보 기술 조사
-- 프로젝트를 end-to-end 학습형보다 **모듈형 파이프라인**으로 진행하기로 방향 정리
+### 주요 참고 자료
 
-## 8. 향후 계획
+- Zero-Shot Scene Reconstruction from Single Images with Deep Prior Assembly
+- Diorama: Unleashing Zero-shot Single-view 3D Indoor Scene Modeling
+- 3D-RE-GEN: 3D Reconstruction of Indoor Scenes with a Generative Framework
+- DepR: Depth Guided Single-view Scene Reconstruction with Instance-level Diffusion
+- InstaScene: Towards Complete 3D Instance Decomposition and Reconstruction from Cluttered Scenes
+- PixARMesh: Autoregressive Mesh-Native Single-View Scene Reconstruction
+- Gen3DSR: Generalizable 3D Scene Reconstruction via Divide and Conquer from a Single View
+- Open-World Amodal Appearance Completion
 
-### 단기 계획
-
-- README와 프로젝트 구조 정리
-- 최소 실행 파이프라인 설계
-- 객체 분리와 depth 추정부터 먼저 테스트
-- 객체 하나를 3D로 생성한 뒤 원래 장면 위치에 다시 배치하는 최소 데모 구현
-
-### 중기 계획
-
-- 객체별 가려진 부분 보완 추가
-- 여러 객체에 대한 반복 적용
-- 배경 / 구조물 복원 추가
-- scene assembly 결과 시각화
-- 출력 포맷 정리 및 외부 툴 연동 가능성 검토
-
-### 장기 계획
-
-- scene quality 고도화
-- textured asset generation 강화
-- geometry / placement optimization 개선
-- 필요 시 더 통합된 scene generation 계열 연구 방향 흡수
-
-## 9. 프로젝트 방향 한 줄 요약
-
-본 프로젝트는 단일 이미지를 입력으로 받아 객체를 분리하고, 깊이와 기하 정보를 추정하며, 객체별 3D 자산을 생성한 뒤 이를 장면 좌표계에 배치하여 최종적으로 하나의 3D 월드 기반 scene으로 재구성하는 **모듈형 파이프라인 시스템**을 목표로 한다. 그 구현 철학은 Deep Prior Assembly, Gen3DSR, 3D-RE-GEN 계열의 최근 연구 흐름을 따른다.
