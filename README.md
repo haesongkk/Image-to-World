@@ -158,6 +158,11 @@
   - 객체별 중간 산출물 저장
   - 최종 scene 결과물 export 및 외부 툴 확인 가능 구조
 
+![INPUT](./doc/260327/input.jpg)
+![FRONT](./doc/260327/front.png)
+![SIDE](./doc/260327/side.png)
+![TOP](./doc/260327/top.png)
+
 ---
 
 ## 4. 앞으로 수행할 작업 (TODO)
@@ -225,12 +230,12 @@
 
 ### 주요 참고 자료
 
-- Zero-Shot Scene Reconstruction from Single Images with Deep Prior Assembly
-- Diorama: Unleashing Zero-shot Single-view 3D Indoor Scene Modeling
-- 3D-RE-GEN: 3D Reconstruction of Indoor Scenes with a Generative Framework
-- DepR: Depth Guided Single-view Scene Reconstruction with Instance-level Diffusion
-- InstaScene: Towards Complete 3D Instance Decomposition and Reconstruction from Cluttered Scenes
-- PixARMesh: Autoregressive Mesh-Native Single-View Scene Reconstruction
-- Gen3DSR: Generalizable 3D Scene Reconstruction via Divide and Conquer from a Single View
-- Open-World Amodal Appearance Completion
+- [Zero-Shot Scene Reconstruction from Single Images with Deep Prior Assembly](https://arxiv.org/html/2410.15971v1)
+- [Diorama: Unleashing Zero-shot Single-view 3D Indoor Scene Modeling](https://arxiv.org/html/2411.19492v2)
+- [3D-RE-GEN: 3D Reconstruction of Indoor Scenes with a Generative Framework](https://arxiv.org/html/2512.17459v1)
+- [DepR: Depth Guided Single-view Scene Reconstruction with Instance-level Diffusion](https://arxiv.org/html/2507.22825v1)
+- [InstaScene: Towards Complete 3D Instance Decomposition and Reconstruction from Cluttered Scenes](https://arxiv.org/html/2507.08416v2)
+- [PixARMesh: Autoregressive Mesh-Native Single-View Scene Reconstruction](https://arxiv.org/html/2603.05888v1)
+- [Gen3DSR: Generalizable 3D Scene Reconstruction via Divide and Conquer from a Single View](https://arxiv.org/html/2404.03421v2)
+- [Open-World Amodal Appearance Completion](https://arxiv.org/html/2411.13019v1)
 
