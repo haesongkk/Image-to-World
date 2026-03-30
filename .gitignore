@@ -7,4 +7,4 @@ shap-e/
 shap_e_model_cache/
 
 pretrained/
-tmp/
+artifacts/
