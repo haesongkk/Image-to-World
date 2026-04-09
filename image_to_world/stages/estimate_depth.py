@@ -81,7 +81,10 @@ class EstimateDepthStage(Stage):
         image = Image.open(self.config.image_path).convert("RGB")
         image_np = np.array(image)
         h, w = image_np.shape[:2]
-        depth = self.adapter.estimate(image)
+        depth_result = self.adapter.estimate(image)
+        depth = depth_result["depth"]
+        depth_type = depth_result.get("depth_type", "absolute")
+        adapter_metadata = depth_result.get("metadata", {})
         depth_npy_path = self.config.output_dir / "depth_raw.npy"
         np.save(depth_npy_path, depth)
         depth_u8 = self.normalize_to_uint(depth, 255, np.uint8)
@@ -122,8 +125,10 @@ class EstimateDepthStage(Stage):
             "image_path": str(self.config.image_path),
             "mask_result_json_path": str(self.config.mask_result_json_path) if self.config.mask_result_json_path.exists() else None,
             "model_id": self.config.model_id,
+            "model_family": self.config.model_family,
             "device": self.runtime.device,
-            "depth_type": "relative",
+            "depth_type": depth_type,
+            "depth_unit": "meters",
             "image_size_wh": [w, h],
             "depth_raw_npy_path": str(depth_npy_path),
             "depth_gray_8bit_path": str(depth_gray_path),
@@ -138,6 +143,7 @@ class EstimateDepthStage(Stage):
                 "depth_median": float(np.median(depth)),
                 "depth_std": float(depth.std()),
             },
+            "adapter_metadata": adapter_metadata,
             "annotations": annotations_out,
         })
         result = StageResult(stage_name=self.stage_name, output_path=output_path, metadata={"count": len(annotations_out)})

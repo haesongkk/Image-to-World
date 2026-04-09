@@ -257,7 +257,7 @@ def cube_world_corners(
     return corners_np, edges
 
 
-def relative_depth_to_camera_points(
+def depth_to_camera_points(
     *,
     xs: np.ndarray,
     ys: np.ndarray,
@@ -266,16 +266,9 @@ def relative_depth_to_camera_points(
     fy: float,
     cx: float,
     cy: float,
-    global_depth_min: float,
-    global_depth_max: float,
-    z_near: float = 1.0,
-    z_far: float = 6.0,
+    depth_scale: float = 1.0,
 ) -> np.ndarray:
-    if global_depth_max - global_depth_min < 1e-8:
-        z_norm = np.full_like(depth_values, 0.5, dtype=np.float64)
-    else:
-        z_norm = np.clip((depth_values - global_depth_min) / (global_depth_max - global_depth_min), 0.0, 1.0)
-    z_camera = z_near + (1.0 - z_norm) * (z_far - z_near)
+    z_camera = np.maximum(depth_values * depth_scale, 1e-3)
     x_camera = ((xs - cx) / max(fx, 1e-6)) * z_camera
     y_camera = -((ys - cy) / max(fy, 1e-6)) * z_camera
     return np.stack([x_camera, y_camera, z_camera], axis=1)
@@ -488,14 +481,14 @@ def render_camera_calibrated_pointcloud(
     max_points_per_object: int = 1200,
 ) -> None:
     image_h, image_w = depth.shape[:2]
-    global_depth_min = float(np.nanmin(depth))
-    global_depth_max = float(np.nanmax(depth))
     fx = float(camera_payload["intrinsics"]["fx"])
     fy = float(camera_payload["intrinsics"]["fy"])
     cx = float(camera_payload["intrinsics"]["cx"])
     cy = float(camera_payload["intrinsics"]["cy"])
     roll_deg = float(camera_payload["orientation"]["roll_deg"])
     pitch_deg = float(camera_payload["orientation"]["pitch_deg"])
+    depth_context = camera_payload.get("depth_context") or {}
+    depth_scale = float(depth_context.get("absolute_depth_scale_multiplier", 1.0))
 
     fig = plt.figure(figsize=(16, 12))
     axes = [
@@ -527,7 +520,7 @@ def render_camera_calibrated_pointcloud(
         xs = xs[valid]
         ys = ys[valid]
         depth_values = depth_values[valid]
-        points_camera = relative_depth_to_camera_points(
+        points_camera = depth_to_camera_points(
             xs=xs,
             ys=ys,
             depth_values=depth_values,
@@ -535,8 +528,7 @@ def render_camera_calibrated_pointcloud(
             fy=fy,
             cx=cx,
             cy=cy,
-            global_depth_min=global_depth_min,
-            global_depth_max=global_depth_max,
+            depth_scale=depth_scale,
         )
         points = camera_points_to_visual(points_camera, roll_deg=roll_deg, pitch_deg=pitch_deg)
         color = deterministic_color(idx)
@@ -576,9 +568,9 @@ def render_camera_calibrated_pointcloud(
         "num_objects": len(object_summaries),
         "objects": object_summaries,
         "notes": [
-            "Relative depth is lifted with estimated fx/fy/cx/cy into a camera-calibrated pseudo-3D point cloud.",
+            "Absolute depth is lifted with estimated fx/fy/cx/cy into a camera-calibrated 3D point cloud.",
             "Pitch and roll are used to level the scene before visualization.",
-            "Absolute scale is still approximate because the source depth remains relative.",
+            "Depth values are interpreted as camera-space Z in meters after the configured scale multiplier.",
         ],
     })
 

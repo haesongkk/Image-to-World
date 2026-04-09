@@ -38,28 +38,20 @@ def sample_mask_points(mask: np.ndarray, max_points: int) -> tuple[np.ndarray, n
     return xs[select].astype(np.float64), ys[select].astype(np.float64)
 
 
-def depth_to_pseudo_points(
+def depth_to_points(
     *,
     xs: np.ndarray,
     ys: np.ndarray,
     depth_values: np.ndarray,
     image_w: int,
     image_h: int,
-    global_depth_min: float,
-    global_depth_max: float,
-    xy_scale: float,
-    z_scale: float,
 ) -> np.ndarray:
-    if global_depth_max - global_depth_min < 1e-8:
-        z_norm = np.full_like(depth_values, 0.5, dtype=np.float64)
-    else:
-        z_norm = np.clip((depth_values - global_depth_min) / (global_depth_max - global_depth_min), 0.0, 1.0)
     cx = image_w * 0.5
     cy = image_h * 0.5
-    xw = ((xs - cx) / max(float(image_w), 1.0)) * xy_scale
-    yw = -((ys - cy) / max(float(image_h), 1.0)) * xy_scale * (float(image_h) / max(float(image_w), 1.0))
-    zw = (1.0 - z_norm) * z_scale
-    return np.stack([xw, zw, yw], axis=1)
+    z_camera = np.maximum(depth_values, 1e-3)
+    x_camera = ((xs - cx) / max(float(image_w), 1.0)) * z_camera
+    y_camera = -((ys - cy) / max(float(image_h), 1.0)) * z_camera * (float(image_h) / max(float(image_w), 1.0))
+    return np.stack([x_camera, z_camera, y_camera], axis=1)
 
 
 def set_equal_limits_3d(ax, points: np.ndarray, pad_ratio: float = 0.08) -> None:
@@ -85,10 +77,6 @@ def render_depth_object_pointcloud(
     max_points_per_object: int = 1200,
 ) -> None:
     image_h, image_w = depth.shape[:2]
-    global_depth_min = float(np.nanmin(depth))
-    global_depth_max = float(np.nanmax(depth))
-    xy_scale = 2.0
-    z_scale = xy_scale * 1.35
     fig = plt.figure(figsize=(16, 12))
     axes = [
         fig.add_subplot(2, 2, 1, projection="3d"),
@@ -119,16 +107,12 @@ def render_depth_object_pointcloud(
         xs = xs[valid]
         ys = ys[valid]
         depth_values = depth_values[valid]
-        points = depth_to_pseudo_points(
+        points = depth_to_points(
             xs=xs,
             ys=ys,
             depth_values=depth_values,
             image_w=image_w,
             image_h=image_h,
-            global_depth_min=global_depth_min,
-            global_depth_max=global_depth_max,
-            xy_scale=xy_scale,
-            z_scale=z_scale,
         )
         color = deterministic_color(idx)
         for ax in axes:
@@ -149,14 +133,14 @@ def render_depth_object_pointcloud(
     all_concat = np.concatenate(all_points, axis=0) if all_points else np.empty((0, 3), dtype=np.float64)
     for ax, (title, elev, azim) in zip(axes, view_specs):
         ax.set_title(f"{title} View")
-        ax.set_xlabel("image plane X")
-        ax.set_ylabel("depth")
-        ax.set_zlabel("image plane Y")
+        ax.set_xlabel("world X")
+        ax.set_ylabel("world Z")
+        ax.set_zlabel("world Y")
         ax.view_init(elev=elev, azim=azim)
         if all_points:
             set_equal_limits_3d(ax, all_concat)
 
-    fig.suptitle("Depth Object Point Cloud Multi-View", fontsize=16)
+    fig.suptitle("Depth Object Point Cloud", fontsize=16)
     fig.tight_layout()
     fig.savefig(png_path, dpi=180)
     plt.close(fig)
@@ -167,8 +151,8 @@ def render_depth_object_pointcloud(
         "num_objects": len(object_summaries),
         "objects": object_summaries,
         "notes": [
-            "Each object mask is rendered as a differently colored 3D point cloud in a shared image/depth coordinate frame.",
-            "X and Y stay close to the image plane, while depth extrudes the scene outward.",
+            "Each object mask is rendered using the same displayed axis convention as the camera-calibrated point cloud.",
+            "Displayed axes follow world X, world Z, and world Y, with depth used as the forward axis.",
             "Views are perspective, top, front, and side.",
         ],
     })

@@ -70,7 +70,8 @@ class DepthEstimationConfig:
     image_path: Path = field(default_factory=lambda: artifact_path("raw_image.jpg"))
     mask_result_json_path: Path = field(default_factory=lambda: artifact_path("generate_masks", "result.json"))
     output_dir: Path = field(default_factory=lambda: artifact_path("estimate_depth"))
-    model_id: str = "depth-anything/Depth-Anything-V2-Small-hf"
+    model_id: str = "apple/DepthPro-hf"
+    model_family: str = "auto"
 
 
 @dataclass
@@ -92,12 +93,10 @@ class SceneLayoutConfig:
     gen3d_json_path: Path = field(default_factory=lambda: artifact_path("generate_meshes", "gen3d_result.json"))
     output_dir: Path = field(default_factory=lambda: artifact_path("compose_layout"))
     raw_image_path: Path = field(default_factory=lambda: artifact_path("raw_image.jpg"))
-    close_is_larger: bool = True
-    z_near: float = 1.0
-    z_far: float = 6.0
     focal_scale_x: float = 1.2
     focal_scale_y: float = 1.2
     global_scale_multiplier: float = 1.0
+    absolute_depth_scale_multiplier: float = 1.0
     save_visualization: bool = True
 
 

@@ -81,7 +81,7 @@ class Placement:
     bbox_center_xy: list[float]
     bbox_size_wh: list[float]
     depth_source: str
-    relative_depth_value: float
+    depth_value: float
     pseudo_world: dict[str, Any]
     mesh: MeshArtifact
     source_paths: dict[str, Any]

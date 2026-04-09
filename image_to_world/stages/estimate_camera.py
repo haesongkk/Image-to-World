@@ -79,6 +79,26 @@ class EstimateCameraStage(Stage):
             "camera_depth_pointcloud_path": str(pointcloud_path) if self.config.depth_result_json_path.exists() else None,
             "camera_depth_pointcloud_summary_path": str(pointcloud_summary_path) if self.config.depth_result_json_path.exists() else None,
         }
+        if self.config.depth_result_json_path.exists() and self.config.mask_result_json_path.exists():
+            depth_result = load_json(self.config.depth_result_json_path)
+            payload["depth_context"] = {
+                "depth_type": depth_result.get("depth_type"),
+                "depth_unit": depth_result.get("depth_unit"),
+                "global_depth_stats": depth_result.get("global_depth_stats"),
+                "adapter_metadata": depth_result.get("adapter_metadata"),
+                "absolute_depth_scale_multiplier": 1.0,
+            }
+            depth_npy_path = depth_result.get("depth_raw_npy_path")
+            annotations = depth_result.get("annotations", [])
+            if depth_npy_path:
+                depth = np.load(depth_npy_path)
+                render_camera_calibrated_pointcloud(
+                    depth=depth,
+                    annotations=annotations,
+                    camera_payload=payload,
+                    png_path=pointcloud_path,
+                    summary_path=pointcloud_summary_path,
+                )
         save_json(output_path, payload)
         render_camera_estimate_visualization(
             raw_image_path=self.config.image_path,
@@ -92,19 +112,6 @@ class EstimateCameraStage(Stage):
             png_path=preview_path,
             summary_path=preview_summary_path,
         )
-        if self.config.depth_result_json_path.exists() and self.config.mask_result_json_path.exists():
-            depth_result = load_json(self.config.depth_result_json_path)
-            depth_npy_path = depth_result.get("depth_raw_npy_path")
-            annotations = depth_result.get("annotations", [])
-            if depth_npy_path:
-                depth = np.load(depth_npy_path)
-                render_camera_calibrated_pointcloud(
-                    depth=depth,
-                    annotations=annotations,
-                    camera_payload=payload,
-                    png_path=pointcloud_path,
-                    summary_path=pointcloud_summary_path,
-                )
         result = StageResult(stage_name=self.stage_name, output_path=output_path, metadata={"confidence": confidence})
         return self.finalize(result, self.config_to_cache_payload(self.config))
 

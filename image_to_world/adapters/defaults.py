@@ -140,7 +140,7 @@ class ShapEGenerator:
         return mesh
 
 
-class DepthAnythingEstimator:
+class ConfigurableDepthEstimator:
     def __init__(self, config: DepthEstimationConfig, device: str) -> None:
         self.config = config
         self.device = device
@@ -161,4 +161,20 @@ class DepthAnythingEstimator:
         with torch.no_grad():
             outputs = model(**inputs)
         post_processed = processor.post_process_depth_estimation(outputs, target_sizes=[(image.height, image.width)])
-        return post_processed[0]["predicted_depth"].detach().cpu().numpy().astype(np.float32)
+        predicted = post_processed[0]["predicted_depth"].detach().cpu().numpy().astype(np.float32)
+        metadata = {
+            "model_family": self.config.model_family,
+        }
+        if "field_of_view" in post_processed[0]:
+            fov_value = post_processed[0]["field_of_view"]
+            if hasattr(fov_value, "detach"):
+                fov_value = fov_value.detach().cpu().numpy()
+            metadata["field_of_view"] = np.asarray(fov_value).tolist()
+        return {
+            "depth": predicted,
+            "depth_type": "absolute",
+            "metadata": metadata,
+        }
+
+
+DepthAnythingEstimator = ConfigurableDepthEstimator
