@@ -108,6 +108,12 @@ class SceneAssemblyConfig:
     axis_length: float = 0.6
     normalize_mesh_to_unit_box: bool = True
     global_pre_rot_euler_deg: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    save_visualization: bool = True
+    visualization_backend: str = "auto"
+    visualization_device: str = "cuda"
+    visualization_image_size: int = 1400
+    visualization_point_size: int = 2
+    visualization_max_faces_per_object: int | None = 12000
     object_color_palette: list[tuple[float, float, float]] = field(default_factory=lambda: [
         (0.90, 0.25, 0.25), (0.25, 0.55, 0.95), (0.20, 0.75, 0.35), (0.95, 0.70, 0.20),
         (0.65, 0.35, 0.90), (0.20, 0.80, 0.80), (0.95, 0.45, 0.70), (0.60, 0.60, 0.20),

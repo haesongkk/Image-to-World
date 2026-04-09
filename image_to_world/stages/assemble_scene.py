@@ -13,6 +13,7 @@ from image_to_world.io.obj_utils import load_obj_basic
 from image_to_world.manifest import ManifestStore
 from image_to_world.schemas import StageResult
 from image_to_world.stages.base import Stage
+from image_to_world.visualization.scene_assembly_viz_torch import render_assembled_scene_visualization_torch
 
 
 AXIS_MATERIALS = {
@@ -24,6 +25,24 @@ AXIS_MATERIALS = {
 
 class AssembleSceneStage(Stage):
     stage_name = "assemble_scene"
+    UNIT_CUBE_VERTICES = np.array([
+        [-0.5, -0.5, -0.5],
+        [0.5, -0.5, -0.5],
+        [0.5, 0.5, -0.5],
+        [-0.5, 0.5, -0.5],
+        [-0.5, -0.5, 0.5],
+        [0.5, -0.5, 0.5],
+        [0.5, 0.5, 0.5],
+        [-0.5, 0.5, 0.5],
+    ], dtype=np.float64)
+    UNIT_CUBE_FACES = [
+        (0, 1, 2), (0, 2, 3),
+        (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5),
+        (2, 3, 7), (2, 7, 6),
+        (3, 0, 4), (3, 4, 7),
+    ]
 
     def __init__(self, *, config: SceneAssemblyConfig, runtime: RuntimeConfig, manifest: ManifestStore, cache: CacheStore) -> None:
         super().__init__(manifest=manifest, cache=cache)
@@ -55,7 +74,7 @@ class AssembleSceneStage(Stage):
         scale_xyz = pseudo.get("scale_xyz", [1.0, 1.0, 1.0])
         rot_xyz_deg = pseudo.get("rotation_euler_xyz_deg", [0.0, 0.0, 0.0])
         pos_xyz = pseudo.get("position_xyz", [0.0, 0.0, 0.0])
-        pos_xyz = [float(pos_xyz[0]), float(pos_xyz[1]), -float(pos_xyz[2])]
+        pos_xyz = [float(pos_xyz[0]), float(pos_xyz[1]), float(pos_xyz[2])]
         pre_rot = rotation_matrix_xyz_deg(self.config.global_pre_rot_euler_deg)
         vertices = (pre_rot @ vertices.T).T
         transform = compose_transform(scale_xyz=scale_xyz, rot_xyz_deg=rot_xyz_deg, translate_xyz=pos_xyz)
@@ -76,9 +95,48 @@ class AssembleSceneStage(Stage):
             "class_name": class_name,
         }
 
+    def build_cube_record(self, placement: dict, object_index: int) -> dict:
+        pseudo = placement["pseudo_world"]
+        scale_xyz = pseudo.get("scale_xyz", [1.0, 1.0, 1.0])
+        rot_xyz_deg = pseudo.get("rotation_euler_xyz_deg", [0.0, 0.0, 0.0])
+        pos_xyz = pseudo.get("position_xyz", [0.0, 0.0, 0.0])
+        pos_xyz = [float(pos_xyz[0]), float(pos_xyz[1]), float(pos_xyz[2])]
+        pre_rot = rotation_matrix_xyz_deg(self.config.global_pre_rot_euler_deg)
+        vertices = (pre_rot @ self.UNIT_CUBE_VERTICES.T).T
+        transform = compose_transform(scale_xyz=scale_xyz, rot_xyz_deg=rot_xyz_deg, translate_xyz=pos_xyz)
+        vertices_world = apply_transform(vertices, transform)
+        class_name = placement.get("class_name") or f"object_{object_index:02d}"
+        return {
+            "source_obj_path": None,
+            "source_primitive": "cube",
+            "vertices_world": vertices_world,
+            "faces_v": list(self.UNIT_CUBE_FACES),
+            "normalization_info": {"source": "unit_cube_proxy"},
+            "applied_scale_xyz": scale_xyz,
+            "applied_rotation_euler_xyz_deg": rot_xyz_deg,
+            "applied_translation_xyz": pos_xyz,
+            "object_name": f"object_{object_index:02d}_{class_name}".replace(" ", "_"),
+            "material_name": f"mat_{object_index:02d}_{class_name}".replace(" ", "_"),
+            "material_rgb": list(self.config.object_color_palette[object_index % len(self.config.object_color_palette)]),
+            "placement_id": placement.get("id"),
+            "class_name": class_name,
+        }
+
+    @staticmethod
+    def world_to_export_vertices(vertices_world: np.ndarray) -> np.ndarray:
+        # Compatibility note:
+        # We mirror X at OBJ export ([x, y, z] -> [-x, y, z]) to match current Blender-facing output.
+        # It compensates an upstream axis-handedness mismatch and should be treated as a temporary compatibility fix.
+
+        return np.stack([-vertices_world[:, 0], vertices_world[:, 1], vertices_world[:, 2]], axis=1)
+
     @staticmethod
     def write_axis_helper_obj_lines(handle, start_vertex_index_1based: int, length: float) -> None:
-        verts = [(0.0, 0.0, 0.0), (length, 0.0, 0.0), (0.0, length, 0.0), (0.0, 0.0, length)]
+        verts_world = np.array(
+            [(0.0, 0.0, 0.0), (length, 0.0, 0.0), (0.0, length, 0.0), (0.0, 0.0, length)],
+            dtype=np.float64,
+        )
+        verts = AssembleSceneStage.world_to_export_vertices(verts_world)
         for v in verts:
             handle.write(f"v {v[0]:.8f} {v[1]:.8f} {v[2]:.8f}\n")
         base = start_vertex_index_1based
@@ -113,7 +171,8 @@ class AssembleSceneStage(Stage):
                 handle.write(f"o {rec['object_name']}\n")
                 handle.write(f"# source_obj_path = {rec['source_obj_path']}\n")
                 handle.write(f"usemtl {rec['material_name']}\n")
-                for vertex in rec["vertices_world"]:
+                export_vertices = self.world_to_export_vertices(rec["vertices_world"])
+                for vertex in export_vertices:
                     handle.write(f"v {vertex[0]:.8f} {vertex[1]:.8f} {vertex[2]:.8f}\n")
                 for face in rec["faces_v"]:
                     a = global_vertex_offset + face[0] + 1
@@ -145,12 +204,15 @@ class AssembleSceneStage(Stage):
         transformed_meshes = []
         skipped = []
         for idx, placement in enumerate(placements):
+            primitive_type = placement.get("primitive", {}).get("type")
             obj_path = placement.get("mesh", {}).get("obj_path")
-            if not obj_path or not Path(obj_path).exists():
-                skipped.append({"id": placement.get("id", idx), "class_name": placement.get("class_name"), "reason": f"obj_path missing or not found: {obj_path}"})
-                continue
             try:
-                transformed_meshes.append(self.build_transformed_mesh_record(obj_path, placement, idx))
+                if obj_path and Path(obj_path).exists():
+                    transformed_meshes.append(self.build_transformed_mesh_record(obj_path, placement, idx))
+                elif primitive_type in {"cube", "cuboid"}:
+                    transformed_meshes.append(self.build_cube_record(placement, idx))
+                else:
+                    skipped.append({"id": placement.get("id", idx), "class_name": placement.get("class_name"), "reason": f"obj_path missing or not found: {obj_path}"})
             except Exception as exc:
                 skipped.append({"id": placement.get("id", idx), "class_name": placement.get("class_name"), "reason": str(exc)})
 
@@ -167,10 +229,29 @@ class AssembleSceneStage(Stage):
                 r, g, b = rec["material_rgb"]
                 handle.write(f"{rec['object_name']},{rec['material_name']},{r:.6f},{g:.6f},{b:.6f},{center[0]:.8f},{center[1]:.8f},{center[2]:.8f}\n")
 
+        preview_png_path = self.config.output_dir / "scene_assembly_preview.png"
+        preview_summary_path = self.config.output_dir / "scene_assembly_preview_summary.json"
+        if self.config.save_visualization:
+            backend = (self.config.visualization_backend or "auto").strip().lower()
+            if backend in {"auto", "torch", "cuda"}:
+                render_assembled_scene_visualization_torch(
+                    transformed_meshes=transformed_meshes,
+                    png_path=preview_png_path,
+                    summary_path=preview_summary_path,
+                    device=self.config.visualization_device,
+                    image_size=self.config.visualization_image_size,
+                    point_size=max(1, int(self.config.visualization_point_size)),
+                )
+            else:
+                raise ValueError(f"Unsupported scene assembly visualization backend: {backend}")
+
         save_json(output_path, {
             "input_layout_json_path": str(self.config.input_layout_json_path),
             "output_obj_path": str(merged_obj_path),
             "output_mtl_path": str(merged_mtl_path),
+            "preview_csv_path": str(preview_csv_path),
+            "preview_png_path": str(preview_png_path) if self.config.save_visualization else None,
+            "preview_summary_path": str(preview_summary_path) if self.config.save_visualization else None,
             "num_input_placements": len(placements),
             "num_assembled_objects": len(transformed_meshes),
             "num_skipped_objects": len(skipped),
@@ -180,6 +261,13 @@ class AssembleSceneStage(Stage):
                 "axis_length": self.config.axis_length,
                 "normalize_mesh_to_unit_box": self.config.normalize_mesh_to_unit_box,
                 "global_pre_rot_euler_deg": self.config.global_pre_rot_euler_deg,
+                "obj_export_axis_mapping": "blender_mirror_x_[-x,y,z]",
+                "save_visualization": self.config.save_visualization,
+                "visualization_backend": self.config.visualization_backend,
+                "visualization_device": self.config.visualization_device,
+                "visualization_image_size": self.config.visualization_image_size,
+                "visualization_point_size": self.config.visualization_point_size,
+                "visualization_max_faces_per_object": self.config.visualization_max_faces_per_object,
                 "object_color_palette": [list(c) for c in self.config.object_color_palette],
             },
             "assembled_objects": [{
@@ -219,3 +307,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
