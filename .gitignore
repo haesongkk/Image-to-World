@@ -8,3 +8,4 @@ shap_e_model_cache/
 
 pretrained/
 artifacts/
+external/

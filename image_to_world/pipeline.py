@@ -9,6 +9,7 @@ from image_to_world.manifest import ManifestStore
 from image_to_world.stages.assemble_scene import AssembleSceneStage
 from image_to_world.stages.complete_objects import CompleteObjectsStage
 from image_to_world.stages.compose_layout import ComposeLayoutStage
+from image_to_world.stages.estimate_camera import EstimateCameraStage
 from image_to_world.stages.estimate_depth import EstimateDepthStage
 from image_to_world.stages.extract_tags import ExtractTagsStage
 from image_to_world.stages.generate_masks import GenerateMasksStage
@@ -20,6 +21,7 @@ STAGE_ORDER = [
     "complete_objects",
     "generate_meshes",
     "estimate_depth",
+    "estimate_camera",
     "compose_layout",
     "assemble_scene",
 ]
@@ -33,6 +35,7 @@ def build_stage_map(config: PipelineConfig, manifest: ManifestStore, cache: Cach
         "complete_objects": CompleteObjectsStage(config=config.complete_objects, runtime=runtime, manifest=manifest, cache=cache),
         "generate_meshes": GenerateMeshesStage(config=config.generate_meshes, runtime=runtime, manifest=manifest, cache=cache),
         "estimate_depth": EstimateDepthStage(config=config.estimate_depth, runtime=runtime, manifest=manifest, cache=cache),
+        "estimate_camera": EstimateCameraStage(config=config.estimate_camera, runtime=runtime, manifest=manifest, cache=cache),
         "compose_layout": ComposeLayoutStage(config=config.compose_layout, runtime=runtime, manifest=manifest, cache=cache),
         "assemble_scene": AssembleSceneStage(config=config.assemble_scene, runtime=runtime, manifest=manifest, cache=cache),
     }

@@ -74,9 +74,21 @@ class DepthEstimationConfig:
 
 
 @dataclass
+class CameraEstimationConfig:
+    image_path: Path = field(default_factory=lambda: artifact_path("raw_image.jpg"))
+    mask_result_json_path: Path = field(default_factory=lambda: artifact_path("generate_masks", "result.json"))
+    depth_result_json_path: Path = field(default_factory=lambda: artifact_path("estimate_depth", "result.json"))
+    output_dir: Path = field(default_factory=lambda: artifact_path("estimate_camera"))
+    model_version: str = "Paramnet-360Cities-edina-uncentered"
+    weights_path: Path = field(default_factory=lambda: project_path("external", "PerspectiveFields", "models", "paramnet_360cities_edina_rpfpp.pth"))
+    config_file: str = "paramnet_360cities_edina_rpfpp.yaml"
+
+
+@dataclass
 class SceneLayoutConfig:
     mask_json_path: Path = field(default_factory=lambda: artifact_path("generate_masks", "result.json"))
     depth_json_path: Path = field(default_factory=lambda: artifact_path("estimate_depth", "result.json"))
+    camera_json_path: Path = field(default_factory=lambda: artifact_path("estimate_camera", "result.json"))
     gen3d_json_path: Path = field(default_factory=lambda: artifact_path("generate_meshes", "gen3d_result.json"))
     output_dir: Path = field(default_factory=lambda: artifact_path("compose_layout"))
     raw_image_path: Path = field(default_factory=lambda: artifact_path("raw_image.jpg"))
@@ -112,6 +124,7 @@ class PipelineConfig:
     complete_objects: ObjectCompletionConfig = field(default_factory=ObjectCompletionConfig)
     generate_meshes: MeshGenerationConfig = field(default_factory=MeshGenerationConfig)
     estimate_depth: DepthEstimationConfig = field(default_factory=DepthEstimationConfig)
+    estimate_camera: CameraEstimationConfig = field(default_factory=CameraEstimationConfig)
     compose_layout: SceneLayoutConfig = field(default_factory=SceneLayoutConfig)
     assemble_scene: SceneAssemblyConfig = field(default_factory=SceneAssemblyConfig)
 
