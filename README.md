@@ -1,8 +1,6 @@
-# Image-to-World
+﻿# Image-to-World
 
 단일 이미지를 입력으로 받아 객체 단위로 장면을 분해하고, 각 객체의 3D 자산과 깊이 정보를 추정한 뒤 하나의 scene으로 다시 조합하는 modular reconstruction pipeline입니다.
-
-이 프로젝트는 monolithic end-to-end 모델을 바로 학습하는 대신, intermediate artifact를 직접 확인하고 단계별로 개선할 수 있는 구조를 우선 목표로 삼았습니다. 현재 결과물은 metric-accurate reconstruction이라기보다, single-image indoor scene reconstruction을 위한 inspectable prototype에 가깝습니다.
 
 ## 프로젝트 개요
 
@@ -16,45 +14,17 @@
 - 상대적 depth를 바탕으로 장면 안의 배치를 추정해야 함
 - 최종적으로 하나의 scene mesh로 조합해야 함
 
-이 프로젝트는 이 문제를 7개의 stage로 나누어 풀고 있습니다.
+이 프로젝트는 이 문제를 여러 단계로 나누어 풀고 있습니다.
 
-- `extract_tags`
-- `generate_masks`
-- `complete_objects`
-- `generate_meshes`
-- `estimate_depth`
-- `compose_layout`
-- `assemble_scene`
+## 개발 환경
 
-### 입력
-
-- 단일 RGB 이미지
-- 기본 입력 경로: `artifacts/raw_image.jpg`
-
-### 출력
-
-- 객체 태그, 마스크, crop, inpaint 결과, depth map, layout JSON, assembled OBJ/MTL
-- 최종 출력 예시:
-  - `artifacts/assemble_scene/assembled_scene.obj`
-  - `artifacts/assemble_scene/assembled_scene.mtl`
-  - `artifacts/assemble_scene/assembly_result.json`
-
-### 왜 이런 구조로 만들었는가
-
-이 프로젝트는 처음부터 “좋은 최종 결과”보다 “어디가 잘 되고 어디가 막히는지 분해해서 볼 수 있는 구조”를 우선했습니다.
-
-- stage별 입력/출력이 분리되어 디버깅이 쉬움
-- 모델 교체와 실험 반복이 쉬움
-- 결과 품질 저하 지점을 추적하기 쉬움
-- 포트폴리오 관점에서도 문제 분해와 설계 의도가 분명하게 드러남
-
-## 프로젝트 상태 요약
-
-- End-to-end prototype 연결 완료
-- canonical stage 이름과 `artifacts/` 구조 정리 완료
-- pipeline orchestrator, manifest, cache, logging 구조 추가 완료
-- layout과 scene assembly는 아직 heuristic 성격이 강함
-- object completion과 image-to-3D 품질은 계속 개선이 필요한 상태
+- 언어: Python 3.11
+- 실행 환경: PyTorch 기반 (`cuda`/`cpu` 선택 가능, GPU 사용 권장)
+- 권장 환경 관리: 프로젝트 로컬 가상환경(`.venv`)
+- 외부 의존 리포지토리: `Grounded-SAM-2`, `shap-e`, `external/PerspectiveFields`
+- 필수 가중치/체크포인트:
+  - `Grounded-SAM-2/checkpoints/sam2.1_hiera_large.pt`
+  - `external/PerspectiveFields/models/paramnet_360cities_edina_rpfpp.pth`
 
 ## 실행 방법
 
@@ -131,67 +101,107 @@ python -m image_to_world.stages.assemble_scene
 --overwrite
 ```
 
-### 5. 실행 중 확인할 파일
-
-pipeline 실행 시 아래 파일들을 기준으로 진행 상태를 확인할 수 있습니다.
-
-- `artifacts/manifest.json`: stage별 최신 실행 기록
-- `artifacts/logs/pipeline.log`: stage 실행 로그
-- stage별 결과 JSON:
-  - `artifacts/extract_tags/ram_result.json`
-  - `artifacts/generate_masks/result.json`
-  - `artifacts/complete_objects/amodal_result.json`
-  - `artifacts/generate_meshes/gen3d_result.json`
-  - `artifacts/estimate_depth/result.json`
-  - `artifacts/compose_layout/scene_layout.json`
-  - `artifacts/assemble_scene/assembly_result.json`
-
-### 6. 테스트
-
-경량 테스트는 아래 명령으로 확인할 수 있습니다.
-
-```bash
-python -m unittest discover -s tests
-```
-
 ## 구현 현황
 
+- [x] 객체별 마스크 추출
+- [x] 객체별 3D mesh 생성
+- [x] 객체별 transform 계산
+- [x] 단일 OBJ/MTL로 scene assembly
 
-| Stage              | Status    | Inputs                           | Outputs                                                                            | Method                                                                              | Notes                                             |
-| ------------------ | --------- | -------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `extract_tags`     | Done      | `artifacts/raw_image.jpg`        | `artifacts/extract_tags/ram_result.json`                                           | RAM++ 기반 tag extraction, background-like tag filtering                              | 배경성 태그가 섞일 수 있어 후처리 품질이 중요함                       |
-| `generate_masks`   | Done      | raw image, extracted tags        | `artifacts/generate_masks/result.json`, masks, crops, overlay                      | Grounding DINO + SAM2                                                               | 상위 stage tag 품질에 영향받음. small object 분리가 불안정할 수 있음 |
-| `complete_objects` | Working   | object RGBA crops                | `artifacts/complete_objects/amodal_result.json`, inpaint inputs, masks, amodal RGB | SDXL Inpainting 기반 object completion                                                | 속도 부담이 크고 object category에 따라 품질 편차가 큼            |
-| `generate_meshes`  | Working   | amodal RGB images                | `artifacts/generate_meshes/gen3d_result.json`, per-object OBJ/PLY                  | Shap-E 기반 image-to-3D mesh generation                                               | mesh noise, topology 품질, texture 부재가 한계           |
-| `estimate_depth`   | Done      | raw image, optional mask JSON    | `artifacts/estimate_depth/result.json`, depth maps, raw depth array                | Depth Anything V2                                                                   | 현재는 relative depth 기반이며 정량 검증은 약함                 |
-| `compose_layout`   | Prototype | mask JSON, depth JSON, mesh JSON | `artifacts/compose_layout/scene_layout.json`, layout preview                       | pseudo pinhole camera, relative depth to pseudo-Z mapping, heuristic object scaling | 배치 로직은 초기화 수준. camera, scale, floor prior 보강이 필요  |
-| `assemble_scene`   | Prototype | layout JSON, per-object OBJ      | `artifacts/assemble_scene/assembled_scene.obj`, `.mtl`, `assembly_result.json`     | OBJ loading, transform composition, merged scene export                             | 최종 scene consistency와 placement realism은 아직 부족    |
+- [x] depth 결과 point cloud 시각화 추가
+- [x] 카메라 추정 stage 추가 및 파이프라인 연결 
+- [x] 카메라/깊이/레이아웃/어셈블리 시각화 흐름 연동
+- [x] depth 모델 전환: relative -> absolute
+- [x] 객체 배치 로직 개선
 
+- [ ] 텍스처 지원 가능한 3D 생성 모델 검토
+- [ ] 3D mesh의 noise와 과도한 geometry를 줄이는 후처리 추가
+- [ ] inpaint 및 mesh 생성 단계 속도 개선 (모델 교체 또는 수치 조정) 
 
-## 다음 작업
+- [ ] 카메라 왜곡 보정 후 월드좌표계 변환 시각화
+- [ ] 객체 마스크 필터링 규칙 (기존 태그 직접 필터링 방식 제거)
+- [ ] 객체 위치,회전,크기 계산 규칙 다시 생각해야함 (depth mask만을 이용한 방식의 한계)
 
-### Priority 1
+- [ ] 배경/구조물 복원
+- [ ] 배치 이상치 정밀 보정 (공중에 뜨거나 서로 겹치는 등의 현상)
+- [ ] 입력 이미지와 비교하여 객체 배치 정밀 보정
 
-- tag 추출 전 배경 분리
-- 객체 배치 정확도 개선
-- `complete_objects` stage의 속도 개선 (모델 교체 또는 수치 조정) 
-- 텍스처 지원 가능한 3D 생성 모델 검토
+- [ ] 외부 라이브러리 의존성 관리 (git clone, pip install git 혼용 중)
+- [ ] 체크포인트 경로 정리
+- [ ] 산출물 경로 정리
+- [ ] image-to-world 폴더 이름 `src` 로 변경
 
-### Priority 2
-
-- 시각화 및 디버깅 기반 확보
-- depth 품질을 정성 확인을 넘어서 placement 결과와 연결해 검증하기
-- transform 계산과 assembly 책임을 더 명확하게 분리하고 calibration 포인트 추가하기
-- `generate_meshes` 결과의 noise와 과도한 geometry를 줄이는 후처리 실험 추가
-
-### Priority 3
-
-- scene-level consistency를 위한 후처리 규칙 또는 refinement 단계 고민하기
-- background / structural reconstruction까지 포함하는 방향으로 확장하기
-- camera recovery, semantic scale prior, scene normalization 도입 검토하기
-- 설정 파일 분리, 자동 비교 리포트, 실험 기록 체계 등 유지보수성 강화하기
+- [ ] OBJ export 축 정합 이슈 정리 (현재 X-mirror 임시 호환 처리 제거 방향 확정)
+- [ ] 카메라 추정 실패 케이스 예외 처리 및 로그 보강
+- [ ] `compose_layout` -> `assemble_scene` 경계 데이터 규칙 정리 (`primitive`/`mesh` fallback)
+- [ ] 시각화 산출물(camera/depth/layout/assembly) 포맷/저장 규칙 문서화
 
 ## 결과물
+
+> `2026-04-10` : 객체 배치 정확도 개선
+
+### Test 01 (기존 이미지)
+
+#### Depth estimation
+
+![Depth Color A](./doc/260409/01/depth_color.png)
+![Depth Objects Pointcloud A](./doc/260409/01/depth_objects_pointcloud.png)
+
+#### Camera calibration
+
+![Camera Calibration Pointcloud A](./doc/260409/01/camera_depth_pointcloud.png)
+
+#### Layout preview
+
+![Layout Preview A](./doc/260409/01/layout_preview.png)
+
+#### Output
+
+![Scene Assembly A](./doc/260409/01/scene_assembly_preview.png)
+![Screenshot A](./doc/260409/01/screenshot.png)
+
+### Notes
+
+- absolute depth와 카메라 추정을 연결하면서 객체 배치 정합도가 이전 대비 개선되었다.
+- 카메라 왜곡 보정 전후 모두 약간씩 오차가 있다.
+- OBJ export 축은 임시 호환 처리이므로 정리가 필요하다.
+
+### Test 02 (단순한 이미지)
+
+#### Input image
+
+![Input B](./doc/260409/02/raw_image.jpg)
+
+#### Object segmentation
+
+![Mask Overlay](./doc/260409/02/overlay.png)
+
+#### Depth estimation
+
+![Depth Color B](./doc/260409/02/depth_color.png)
+![Depth Objects Pointcloud B](./doc/260409/02/depth_objects_pointcloud.png)
+
+#### Camera calibration
+
+![Camera Calibration B](./doc/260409/02/camera_preview.png)
+![Camera Calibration Pointcloud B](./doc/260409/02/camera_depth_pointcloud.png)
+
+#### Layout preview
+
+![Layout Preview B](./doc/260409/02/layout_preview.png)
+
+#### Output
+
+![Scene Assembly B](./doc/260409/02/scene_assembly_preview.png)
+![Screenshot B](./doc/260409/02/screenshot.png)
+
+### Notes
+
+- depth map 만으로 객체의 바운딩 박스를 계산하면 안된다는 것을 확인할 수 있다.
+- Camera calibration Pointcloud 는 월드 좌표계로 변환하여 시각화하는 것이 좋아보인다.
+- 배경이 객체 마스크로 들어간 경우 제외하는 로직이 필요하다.
+
+---
 
 > `2026-03-27` : 전체 파이프라인 설계 및 각 단계별 기능 구현
 
@@ -235,6 +245,9 @@ python -m unittest discover -s tests
 - NumPy
 - Pillow
 - OpenCV
+- Transformers
+- Diffusers
+- Matplotlib
 
 ### Vision / Segmentation
 
@@ -247,11 +260,11 @@ python -m unittest discover -s tests
 - Stable Diffusion XL Inpainting
 - Shap-E
 
-### Depth / Geometry / Scene Assembly
+### Depth / Camera / Geometry / Scene Assembly
 
-- Depth Anything V2
-- heuristic pseudo-camera projection
-- relative depth based object placement
+- DepthPro (`apple/DepthPro-hf`) 기반 absolute depth
+- Perspective Fields 기반 camera parameter estimation
+- camera + depth 기반 pseudo-world object placement
 - OBJ / MTL assembly pipeline
 
 ### Project Structure
@@ -259,6 +272,7 @@ python -m unittest discover -s tests
 - modular stage pipeline
 - dataclass-based config and schema organization
 - artifact manifest and cache tracking
+- stage별 preview/diagnostic visualization outputs
 - unittest-based lightweight validation
 
 ## 참고 자료
@@ -271,8 +285,3 @@ python -m unittest discover -s tests
 - [PixARMesh: Autoregressive Mesh-Native Single-View Scene Reconstruction](https://arxiv.org/html/2603.05888v1)
 - [Gen3DSR: Generalizable 3D Scene Reconstruction via Divide and Conquer from a Single View](https://arxiv.org/html/2404.03421v2)
 - [Open-World Amodal Appearance Completion](https://arxiv.org/html/2411.13019v1)
-
-### 추가 문서
-
-- 좌표계와 pseudo-world 가정은 [doc/coordinate_system.md](doc/coordinate_system.md) 참고
-
