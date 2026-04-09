@@ -15,6 +15,7 @@ from image_to_world.config import DepthEstimationConfig, RuntimeConfig
 from image_to_world.manifest import ManifestStore
 from image_to_world.schemas import DepthAnnotation, StageResult
 from image_to_world.stages.base import Stage
+from image_to_world.visualization.depth_viz import render_depth_object_pointcloud
 
 
 class EstimateDepthStage(Stage):
@@ -106,6 +107,17 @@ class EstimateDepthStage(Stage):
                     mask_depth_stats=self.robust_mask_stats(depth, mask),
                 ).to_dict())
 
+        pointcloud_png_path = self.config.output_dir / "depth_objects_pointcloud.png"
+        pointcloud_summary_path = self.config.output_dir / "depth_objects_pointcloud_summary.json"
+        if annotations_out:
+            render_depth_object_pointcloud(
+                depth=depth,
+                annotations=annotations_out,
+                mask_loader=self.load_mask,
+                png_path=pointcloud_png_path,
+                summary_path=pointcloud_summary_path,
+            )
+
         save_json(output_path, {
             "image_path": str(self.config.image_path),
             "mask_result_json_path": str(self.config.mask_result_json_path) if self.config.mask_result_json_path.exists() else None,
@@ -117,6 +129,8 @@ class EstimateDepthStage(Stage):
             "depth_gray_8bit_path": str(depth_gray_path),
             "depth_gray_16bit_path": str(depth_gray16_path),
             "depth_color_path": str(depth_color_path),
+            "depth_object_pointcloud_path": str(pointcloud_png_path) if annotations_out else None,
+            "depth_object_pointcloud_summary_path": str(pointcloud_summary_path) if annotations_out else None,
             "global_depth_stats": {
                 "depth_min": float(depth.min()),
                 "depth_max": float(depth.max()),
