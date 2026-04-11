@@ -138,103 +138,10 @@ python -m image_to_world.stages.assemble_scene
 
 ## 결과물
 
-> `2026-04-10` : 객체 배치 정확도 개선
+[`2026-04-10` : 객체 배치 정확도 개선](./doc/260409/260409.md)
 
-### Test 01 (기존 이미지)
+[`2026-03-27` : 전체 파이프라인 설계 및 각 단계별 기능 구현](./doc/260327/260327.md)
 
-#### Depth estimation
-
-![Depth Color A](./doc/260409/01/depth_color.png)
-![Depth Objects Pointcloud A](./doc/260409/01/depth_objects_pointcloud.png)
-
-#### Camera calibration
-
-![Camera Calibration Pointcloud A](./doc/260409/01/camera_depth_pointcloud.png)
-
-#### Layout preview
-
-![Layout Preview A](./doc/260409/01/layout_preview.png)
-
-#### Output
-
-![Scene Assembly A](./doc/260409/01/scene_assembly_preview.png)
-![Screenshot A](./doc/260409/01/screenshot.png)
-
-### Notes
-
-- absolute depth와 카메라 추정을 연결하면서 객체 배치 정합도가 이전 대비 개선되었다.
-- 카메라 왜곡 보정 전후 모두 약간씩 오차가 있다.
-- OBJ export 축은 임시 호환 처리이므로 정리가 필요하다.
-
-### Test 02 (단순한 이미지)
-
-#### Input image
-
-![Input B](./doc/260409/02/raw_image.jpg)
-
-#### Object segmentation
-
-![Mask Overlay](./doc/260409/02/overlay.png)
-
-#### Depth estimation
-
-![Depth Color B](./doc/260409/02/depth_color.png)
-![Depth Objects Pointcloud B](./doc/260409/02/depth_objects_pointcloud.png)
-
-#### Camera calibration
-
-![Camera Calibration B](./doc/260409/02/camera_preview.png)
-![Camera Calibration Pointcloud B](./doc/260409/02/camera_depth_pointcloud.png)
-
-#### Layout preview
-
-![Layout Preview B](./doc/260409/02/layout_preview.png)
-
-#### Output
-
-![Scene Assembly B](./doc/260409/02/scene_assembly_preview.png)
-![Screenshot B](./doc/260409/02/screenshot.png)
-
-### Notes
-
-- depth map 만으로 객체의 바운딩 박스를 계산하면 안된다는 것을 확인할 수 있다.
-- Camera calibration Pointcloud 는 월드 좌표계로 변환하여 시각화하는 것이 좋아보인다.
-- 배경이 객체 마스크로 들어간 경우 제외하는 로직이 필요하다.
-
----
-
-> `2026-03-27` : 전체 파이프라인 설계 및 각 단계별 기능 구현
-
-#### Input image
-
-![Input](./doc/260327/input.jpg)
-이미지 출처: [pixabay simple room image](https://pixabay.com/ko/photos/%ec%9d%b8%ed%85%8c%eb%a6%ac%ec%96%b4-%eb%94%94%ec%9e%90%ec%9d%b8-%ed%98%84%eb%8c%80%ec%a0%81%ec%9d%b8-%ec%8a%a4%ed%83%80%ec%9d%bc-4467768/)
-
-#### Object mask / segmentation overlay
-
-![Mask Overlay](./doc/260327/mask.png)
-
-#### Depth estimation preview
-
-![Depth Preview](./doc/260327/depth.png)
-
-#### Layout preview
-
-![Layout Preview](./doc/260327/layout.png)
-
-#### Scene assembly previews
-
-![Front View](./doc/260327/front.png)
-![Side View](./doc/260327/side.png)
-![Top View](./doc/260327/top.png)
-
-### Notes
-
-- 배경과 붙어있는 객체는 잘 분리되지 않았다.
-- 작거나 경계가 애매한 객체도 잘 분리되지 않았다.
-- 객체들의 배치가 원본 이미지와 차이가 크다.
-- depth estimation 결과를 3D 점으로 시각화하여 확인하면 좋을 것 같다.
-- layout 시각화에 크기와 회전에 대한 시각화를 추가하는게 좋을 것 같다.
 
 ## 기술 스택
 
