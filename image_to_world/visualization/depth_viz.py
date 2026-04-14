@@ -49,8 +49,9 @@ def depth_to_points(
     cx = image_w * 0.5
     cy = image_h * 0.5
     z_camera = np.maximum(depth_values, 1e-3)
-    x_camera = ((xs - cx) / max(float(image_w), 1.0)) * z_camera
-    y_camera = -((ys - cy) / max(float(image_h), 1.0)) * z_camera * (float(image_h) / max(float(image_w), 1.0))
+    # Keep Z as metric depth and use only normalized image coordinates for X/Y.
+    x_camera = (xs - cx) / max(float(image_w), 1.0)
+    y_camera = -((ys - cy) / max(float(image_h), 1.0)) * (float(image_h) / max(float(image_w), 1.0))
     return np.stack([x_camera, z_camera, y_camera], axis=1)
 
 
