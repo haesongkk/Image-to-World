@@ -28,33 +28,6 @@ def deterministic_color(idx: int) -> tuple[float, float, float]:
     return PALETTE[idx % len(PALETTE)]
 
 
-def sample_mask_points(mask: np.ndarray, max_points: int) -> tuple[np.ndarray, np.ndarray]:
-    ys, xs = np.nonzero(mask == 1)
-    if xs.size == 0:
-        return xs, ys
-    if xs.size <= max_points:
-        return xs.astype(np.float64), ys.astype(np.float64)
-    select = np.linspace(0, xs.size - 1, num=max_points, dtype=np.int32)
-    return xs[select].astype(np.float64), ys[select].astype(np.float64)
-
-
-def depth_to_points(
-    *,
-    xs: np.ndarray,
-    ys: np.ndarray,
-    depth_values: np.ndarray,
-    image_w: int,
-    image_h: int,
-) -> np.ndarray:
-    cx = image_w * 0.5
-    cy = image_h * 0.5
-    z_camera = np.maximum(depth_values, 1e-3)
-    # Keep Z as metric depth and use only normalized image coordinates for X/Y.
-    x_camera = (xs - cx) / max(float(image_w), 1.0)
-    y_camera = -((ys - cy) / max(float(image_h), 1.0)) * (float(image_h) / max(float(image_w), 1.0))
-    return np.stack([x_camera, z_camera, y_camera], axis=1)
-
-
 def set_equal_limits_3d(ax, points: np.ndarray, pad_ratio: float = 0.08) -> None:
     if points.size == 0:
         return
@@ -70,14 +43,10 @@ def set_equal_limits_3d(ax, points: np.ndarray, pad_ratio: float = 0.08) -> None
 
 def render_depth_object_pointcloud(
     *,
-    depth: np.ndarray,
-    annotations: list[dict[str, Any]],
-    mask_loader,
+    object_pointclouds: list[dict[str, Any]],
     png_path: Path,
     summary_path: Path,
-    max_points_per_object: int = 1200,
 ) -> None:
-    image_h, image_w = depth.shape[:2]
     fig = plt.figure(figsize=(16, 12))
     axes = [
         fig.add_subplot(2, 2, 1, projection="3d"),
@@ -94,41 +63,31 @@ def render_depth_object_pointcloud(
 
     all_points = []
     object_summaries = []
-    for idx, ann in enumerate(annotations):
-        mask = mask_loader(ann.get("mask_path"), (image_h, image_w)) if ann.get("mask_path") else None
-        if mask is None:
+    for idx, obj in enumerate(object_pointclouds):
+        pointcloud_path_raw = obj.get("pointcloud_path")
+        if not pointcloud_path_raw:
             continue
-        xs, ys = sample_mask_points(mask, max_points_per_object)
-        if xs.size == 0:
+        pointcloud_path = Path(str(pointcloud_path_raw))
+        if not pointcloud_path.exists():
             continue
-        depth_values = depth[ys.astype(np.int32), xs.astype(np.int32)].astype(np.float64)
-        valid = np.isfinite(depth_values)
-        if not valid.any():
+        points = np.load(pointcloud_path)
+        if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
             continue
-        xs = xs[valid]
-        ys = ys[valid]
-        depth_values = depth_values[valid]
-        points = depth_to_points(
-            xs=xs,
-            ys=ys,
-            depth_values=depth_values,
-            image_w=image_w,
-            image_h=image_h,
-        )
         color = deterministic_color(idx)
         for ax in axes:
             ax.scatter(points[:, 0], points[:, 1], points[:, 2], s=3.5, color=[color], alpha=0.75, depthshade=False)
         center = points.mean(axis=0)
         for ax_idx, ax in enumerate(axes):
             if ax_idx in (0, 1):
-                ax.text(center[0], center[1], center[2], f"[{ann.get('id', idx)}]", fontsize=7, color="black")
+                ax.text(center[0], center[1], center[2], f"[{obj.get('id', idx)}]", fontsize=7, color="black")
         all_points.append(points)
         object_summaries.append({
-            "id": ann.get("id", idx),
-            "class_name": ann.get("class_name"),
+            "id": obj.get("id", idx),
+            "class_name": obj.get("class_name"),
             "num_points": int(points.shape[0]),
             "color_rgb": list(color),
             "center_xyz": center.tolist(),
+            "pointcloud_path": str(pointcloud_path),
         })
 
     all_concat = np.concatenate(all_points, axis=0) if all_points else np.empty((0, 3), dtype=np.float64)
@@ -147,13 +106,10 @@ def render_depth_object_pointcloud(
     plt.close(fig)
 
     save_json(summary_path, {
-        "image_size_wh": [image_w, image_h],
         "output_png": str(png_path),
         "num_objects": len(object_summaries),
         "objects": object_summaries,
         "notes": [
-            "Each object mask is rendered using the same displayed axis convention as the camera-calibrated point cloud.",
-            "Displayed axes follow world X, world Z, and world Y, with depth used as the forward axis.",
-            "Views are perspective, top, front, and side.",
+            "Point coordinates are precomputed in estimate_depth and loaded here for rendering only.",
         ],
     })

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import cv2
@@ -14,7 +15,10 @@ from image_to_world.config import CameraEstimationConfig, RuntimeConfig
 from image_to_world.manifest import ManifestStore
 from image_to_world.schemas import StageResult
 from image_to_world.stages.base import Stage
-from image_to_world.visualization.camera_viz import render_camera_calibrated_pointcloud, render_camera_estimate_visualization
+from image_to_world.visualization.camera_viz import (
+    render_camera_calibrated_pointcloud,
+    render_camera_estimate_visualization,
+)
 
 
 class EstimateCameraStage(Stage):
@@ -48,27 +52,54 @@ class EstimateCameraStage(Stage):
         return np.linspace(0, count - 1, num=max_count, dtype=np.int32)
 
     @staticmethod
-    def project_pixels_to_camera_frame(
+    def rotation_x(angle_rad: float) -> np.ndarray:
+        c = math.cos(angle_rad)
+        s = math.sin(angle_rad)
+        return np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, c, -s],
+            [0.0, s, c],
+        ], dtype=np.float64)
+
+    @staticmethod
+    def rotation_z(angle_rad: float) -> np.ndarray:
+        c = math.cos(angle_rad)
+        s = math.sin(angle_rad)
+        return np.array([
+            [c, -s, 0.0],
+            [s, c, 0.0],
+            [0.0, 0.0, 1.0],
+        ], dtype=np.float64)
+
+    @classmethod
+    def build_world_to_camera_rotation(cls, *, roll_deg: float, pitch_deg: float) -> np.ndarray:
+        pitch_vis_rad = math.radians(-pitch_deg)
+        roll_rad = math.radians(roll_deg)
+        return cls.rotation_z(roll_rad) @ cls.rotation_x(pitch_vis_rad)
+
+    @staticmethod
+    def depth_to_camera_points(
         *,
         xs: np.ndarray,
         ys: np.ndarray,
         depth_values: np.ndarray,
         fx: float,
         fy: float,
-        cx0: float,
-        cy0: float,
-        pitch_deg: float,
-        roll_deg: float,
+        cx: float,
+        cy: float,
+        depth_scale: float,
     ) -> np.ndarray:
-        dx = xs.astype(np.float64) - float(cx0)
-        dy = ys.astype(np.float64) - float(cy0)
-        roll_rad = np.radians(-float(roll_deg))
-        dx_rot = dx * np.cos(roll_rad) - dy * np.sin(roll_rad)
-        dy_rot = dx * np.sin(roll_rad) + dy * np.cos(roll_rad)
-        z = depth_values.astype(np.float64)
-        x = (dx_rot / float(fx)) * z
-        y = (-(dy_rot / float(fy)) - np.tan(np.radians(float(pitch_deg)))) * z
-        return np.stack([x, y, z], axis=1)
+        z_camera = np.maximum(depth_values.astype(np.float64) * float(depth_scale), 1e-3)
+        x_camera = ((xs.astype(np.float64) - float(cx)) / max(float(fx), 1e-6)) * z_camera
+        y_camera = -((ys.astype(np.float64) - float(cy)) / max(float(fy), 1e-6)) * z_camera
+        return np.stack([x_camera, y_camera, z_camera], axis=1)
+
+    @classmethod
+    def camera_points_to_visual(cls, points_camera: np.ndarray, *, roll_deg: float, pitch_deg: float) -> np.ndarray:
+        rotation_world_to_camera = cls.build_world_to_camera_rotation(roll_deg=roll_deg, pitch_deg=pitch_deg)
+        rotation_camera_to_world = rotation_world_to_camera.T
+        points_world = (rotation_camera_to_world @ points_camera.T).T
+        return np.stack([points_world[:, 0], points_world[:, 2], points_world[:, 1]], axis=1)
 
     def build_object_pointclouds(
         self,
@@ -82,6 +113,7 @@ class EstimateCameraStage(Stage):
         cy0: float,
         pitch_deg: float,
         roll_deg: float,
+        depth_scale: float,
     ) -> list[dict]:
         image_h, image_w = image_hw
         output_dir = self.config.output_dir / "object_pointclouds"
@@ -106,17 +138,17 @@ class EstimateCameraStage(Stage):
             xs = xs[valid]
             ys = ys[valid]
             depth_values = depth_values[valid]
-            points_xyz = self.project_pixels_to_camera_frame(
+            points_camera = self.depth_to_camera_points(
                 xs=xs,
                 ys=ys,
                 depth_values=depth_values,
                 fx=fx,
                 fy=fy,
-                cx0=cx0,
-                cy0=cy0,
-                pitch_deg=pitch_deg,
-                roll_deg=roll_deg,
+                cx=cx0,
+                cy=cy0,
+                depth_scale=depth_scale,
             )
+            points_xyz = self.camera_points_to_visual(points_camera, roll_deg=roll_deg, pitch_deg=pitch_deg)
             pointcloud_path = output_dir / f"object_{int(obj_id):03d}.npy"
             np.save(pointcloud_path, points_xyz.astype(np.float32))
             pointclouds.append({
@@ -225,16 +257,8 @@ class EstimateCameraStage(Stage):
                 "absolute_depth_scale_multiplier": 1.0,
             }
             depth_npy_path = depth_result.get("depth_raw_npy_path")
-            annotations = depth_result.get("annotations", [])
             if depth_npy_path:
                 depth = np.load(depth_npy_path)
-                render_camera_calibrated_pointcloud(
-                    depth=depth,
-                    annotations=annotations,
-                    camera_payload=payload,
-                    png_path=pointcloud_path,
-                    summary_path=pointcloud_summary_path,
-                )
                 payload["object_pointclouds"] = self.build_object_pointclouds(
                     mask_annotations=mask_result.get("annotations", []),
                     depth=depth,
@@ -245,6 +269,12 @@ class EstimateCameraStage(Stage):
                     cy0=cy0,
                     pitch_deg=pitch_deg,
                     roll_deg=roll_deg,
+                    depth_scale=float(payload["depth_context"].get("absolute_depth_scale_multiplier", 1.0)),
+                )
+                render_camera_calibrated_pointcloud(
+                    object_pointclouds=payload["object_pointclouds"],
+                    png_path=pointcloud_path,
+                    summary_path=pointcloud_summary_path,
                 )
         save_json(output_path, payload)
         render_camera_estimate_visualization(

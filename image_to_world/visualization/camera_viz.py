@@ -31,31 +31,6 @@ def deterministic_color(idx: int) -> tuple[float, float, float]:
     return PALETTE[idx % len(PALETTE)]
 
 
-def load_mask(mask_path: str | None, target_hw: tuple[int, int]) -> np.ndarray | None:
-    if not mask_path:
-        return None
-    path = Path(mask_path)
-    if not path.exists():
-        return None
-    mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-    if mask is None:
-        return None
-    th, tw = target_hw
-    if mask.shape[:2] != (th, tw):
-        mask = cv2.resize(mask, (tw, th), interpolation=cv2.INTER_NEAREST)
-    return (mask > 127).astype(np.uint8)
-
-
-def sample_mask_points(mask: np.ndarray, max_points: int) -> tuple[np.ndarray, np.ndarray]:
-    ys, xs = np.nonzero(mask == 1)
-    if xs.size == 0:
-        return xs, ys
-    if xs.size <= max_points:
-        return xs.astype(np.float64), ys.astype(np.float64)
-    select = np.linspace(0, xs.size - 1, num=max_points, dtype=np.int32)
-    return xs[select].astype(np.float64), ys[select].astype(np.float64)
-
-
 def set_equal_limits_3d(ax: plt.Axes, points: np.ndarray, pad_ratio: float = 0.08) -> None:
     if points.size == 0:
         return
@@ -257,30 +232,6 @@ def cube_world_corners(
     return corners_np, edges
 
 
-def depth_to_camera_points(
-    *,
-    xs: np.ndarray,
-    ys: np.ndarray,
-    depth_values: np.ndarray,
-    fx: float,
-    fy: float,
-    cx: float,
-    cy: float,
-    depth_scale: float = 1.0,
-) -> np.ndarray:
-    z_camera = np.maximum(depth_values * depth_scale, 1e-3)
-    x_camera = ((xs - cx) / max(fx, 1e-6)) * z_camera
-    y_camera = -((ys - cy) / max(fy, 1e-6)) * z_camera
-    return np.stack([x_camera, y_camera, z_camera], axis=1)
-
-
-def camera_points_to_visual(points_camera: np.ndarray, *, roll_deg: float, pitch_deg: float) -> np.ndarray:
-    rotation_world_to_camera = build_world_to_camera_rotation(roll_deg=roll_deg, pitch_deg=pitch_deg)
-    rotation_camera_to_world = rotation_world_to_camera.T
-    points_world = (rotation_camera_to_world @ points_camera.T).T
-    return np.stack([points_world[:, 0], points_world[:, 2], points_world[:, 1]], axis=1)
-
-
 def draw_reference_volume_overlay(
     ax: plt.Axes,
     *,
@@ -473,23 +424,10 @@ def draw_reference_volume_overlay(
 
 def render_camera_calibrated_pointcloud(
     *,
-    depth: np.ndarray,
-    annotations: list[dict[str, Any]],
-    camera_payload: dict[str, Any],
+    object_pointclouds: list[dict[str, Any]],
     png_path: Path,
     summary_path: Path,
-    max_points_per_object: int = 1200,
 ) -> None:
-    image_h, image_w = depth.shape[:2]
-    fx = float(camera_payload["intrinsics"]["fx"])
-    fy = float(camera_payload["intrinsics"]["fy"])
-    cx = float(camera_payload["intrinsics"]["cx"])
-    cy = float(camera_payload["intrinsics"]["cy"])
-    roll_deg = float(camera_payload["orientation"]["roll_deg"])
-    pitch_deg = float(camera_payload["orientation"]["pitch_deg"])
-    depth_context = camera_payload.get("depth_context") or {}
-    depth_scale = float(depth_context.get("absolute_depth_scale_multiplier", 1.0))
-
     fig = plt.figure(figsize=(16, 12))
     axes = [
         fig.add_subplot(2, 2, 1, projection="3d"),
@@ -506,45 +444,31 @@ def render_camera_calibrated_pointcloud(
 
     all_points: list[np.ndarray] = []
     object_summaries: list[dict[str, Any]] = []
-    for idx, ann in enumerate(annotations):
-        mask = load_mask(ann.get("mask_path"), (image_h, image_w))
-        if mask is None:
+    for idx, obj in enumerate(object_pointclouds):
+        pointcloud_path_raw = obj.get("pointcloud_path")
+        if not pointcloud_path_raw:
             continue
-        xs, ys = sample_mask_points(mask, max_points_per_object)
-        if xs.size == 0:
+        pointcloud_path = Path(str(pointcloud_path_raw))
+        if not pointcloud_path.exists():
             continue
-        depth_values = depth[ys.astype(np.int32), xs.astype(np.int32)].astype(np.float64)
-        valid = np.isfinite(depth_values)
-        if not valid.any():
+        points = np.load(pointcloud_path)
+        if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
             continue
-        xs = xs[valid]
-        ys = ys[valid]
-        depth_values = depth_values[valid]
-        points_camera = depth_to_camera_points(
-            xs=xs,
-            ys=ys,
-            depth_values=depth_values,
-            fx=fx,
-            fy=fy,
-            cx=cx,
-            cy=cy,
-            depth_scale=depth_scale,
-        )
-        points = camera_points_to_visual(points_camera, roll_deg=roll_deg, pitch_deg=pitch_deg)
         color = deterministic_color(idx)
         for ax in axes:
             ax.scatter(points[:, 0], points[:, 1], points[:, 2], s=3.5, color=[color], alpha=0.75, depthshade=False)
         center = points.mean(axis=0)
         for ax_idx, ax in enumerate(axes):
             if ax_idx in (0, 1):
-                ax.text(center[0], center[1], center[2], f"[{ann.get('id', idx)}]", fontsize=7, color="black")
+                ax.text(center[0], center[1], center[2], f"[{obj.get('id', idx)}]", fontsize=7, color="black")
         all_points.append(points)
         object_summaries.append({
-            "id": ann.get("id", idx),
-            "class_name": ann.get("class_name"),
+            "id": obj.get("id", idx),
+            "class_name": obj.get("class_name"),
             "num_points": int(points.shape[0]),
             "color_rgb": list(color),
             "center_xyz": center.tolist(),
+            "pointcloud_path": str(pointcloud_path),
         })
 
     all_concat = np.concatenate(all_points, axis=0) if all_points else np.empty((0, 3), dtype=np.float64)
@@ -563,14 +487,11 @@ def render_camera_calibrated_pointcloud(
     plt.close(fig)
 
     save_json(summary_path, {
-        "image_size_wh": [image_w, image_h],
         "output_png": str(png_path),
         "num_objects": len(object_summaries),
         "objects": object_summaries,
         "notes": [
-            "Absolute depth is lifted with estimated fx/fy/cx/cy into a camera-calibrated 3D point cloud.",
-            "Pitch and roll are used to level the scene before visualization.",
-            "Depth values are interpreted as camera-space Z in meters after the configured scale multiplier.",
+            "Point coordinates are precomputed in estimate_camera and loaded here for rendering only.",
         ],
     })
 

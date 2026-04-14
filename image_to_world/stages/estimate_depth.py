@@ -20,6 +20,7 @@ from image_to_world.visualization.depth_viz import render_depth_object_pointclou
 
 class EstimateDepthStage(Stage):
     stage_name = "estimate_depth"
+    MAX_MASK_POINTS = 1200
 
     def __init__(self, *, config: DepthEstimationConfig, runtime: RuntimeConfig, manifest: ManifestStore, cache: CacheStore) -> None:
         super().__init__(manifest=manifest, cache=cache)
@@ -73,6 +74,80 @@ class EstimateDepthStage(Stage):
         cy = max(0, min(int(round((y1 + y2) * 0.5)), h - 1))
         return float(depth[cy, cx])
 
+    @staticmethod
+    def sample_indices(count: int, max_count: int) -> np.ndarray:
+        if count <= max_count:
+            return np.arange(count, dtype=np.int32)
+        return np.linspace(0, count - 1, num=max_count, dtype=np.int32)
+
+    @staticmethod
+    def depth_to_points(
+        *,
+        xs: np.ndarray,
+        ys: np.ndarray,
+        depth_values: np.ndarray,
+        image_w: int,
+        image_h: int,
+    ) -> np.ndarray:
+        cx = float(image_w) * 0.5
+        cy = float(image_h) * 0.5
+        z_camera = np.maximum(depth_values.astype(np.float64), 1e-3)
+        x_camera = (xs.astype(np.float64) - cx) / max(float(image_w), 1.0)
+        y_camera = -((ys.astype(np.float64) - cy) / max(float(image_h), 1.0)) * (float(image_h) / max(float(image_w), 1.0))
+        return np.stack([x_camera, z_camera, y_camera], axis=1)
+
+    def build_object_pointclouds(
+        self,
+        *,
+        annotations: list[dict[str, Any]],
+        depth: np.ndarray,
+        image_hw: tuple[int, int],
+    ) -> list[dict[str, Any]]:
+        image_h, image_w = image_hw
+        output_dir = self.config.output_dir / "object_pointclouds"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        pointclouds: list[dict[str, Any]] = []
+
+        for ann in annotations:
+            obj_id = ann.get("id")
+            if obj_id is None:
+                continue
+            mask = self.load_mask(ann.get("mask_path"), (image_h, image_w)) if ann.get("mask_path") else None
+            if mask is None:
+                continue
+            ys, xs = np.nonzero(mask == 1)
+            if xs.size < 16:
+                continue
+            select = self.sample_indices(xs.size, self.MAX_MASK_POINTS)
+            xs = xs[select]
+            ys = ys[select]
+            depth_values = depth[ys, xs].astype(np.float64)
+            valid = np.isfinite(depth_values) & (depth_values > 1e-6)
+            if not valid.any():
+                continue
+            xs = xs[valid]
+            ys = ys[valid]
+            depth_values = depth_values[valid]
+            points_xyz = self.depth_to_points(
+                xs=xs,
+                ys=ys,
+                depth_values=depth_values,
+                image_w=image_w,
+                image_h=image_h,
+            )
+            pointcloud_path = output_dir / f"object_{int(obj_id):03d}.npy"
+            np.save(pointcloud_path, points_xyz.astype(np.float32))
+            pointclouds.append({
+                "id": int(obj_id),
+                "class_name": ann.get("class_name"),
+                "pointcloud_path": str(pointcloud_path),
+                "point_count": int(points_xyz.shape[0]),
+                "bounds_min_xyz": points_xyz.min(axis=0).tolist(),
+                "bounds_max_xyz": points_xyz.max(axis=0).tolist(),
+                "centroid_xyz": points_xyz.mean(axis=0).tolist(),
+            })
+        return pointclouds
+
     def run(self) -> StageResult:
         output_path = self.config.output_dir / "result.json"
         if self.should_skip(output_path):
@@ -112,14 +187,19 @@ class EstimateDepthStage(Stage):
 
         pointcloud_png_path = self.config.output_dir / "depth_objects_pointcloud.png"
         pointcloud_summary_path = self.config.output_dir / "depth_objects_pointcloud_summary.json"
+        object_pointclouds: list[dict[str, Any]] = []
         if annotations_out:
-            render_depth_object_pointcloud(
-                depth=depth,
+            object_pointclouds = self.build_object_pointclouds(
                 annotations=annotations_out,
-                mask_loader=self.load_mask,
-                png_path=pointcloud_png_path,
-                summary_path=pointcloud_summary_path,
+                depth=depth,
+                image_hw=(h, w),
             )
+            if object_pointclouds:
+                render_depth_object_pointcloud(
+                    object_pointclouds=object_pointclouds,
+                    png_path=pointcloud_png_path,
+                    summary_path=pointcloud_summary_path,
+                )
 
         save_json(output_path, {
             "image_path": str(self.config.image_path),
@@ -134,8 +214,9 @@ class EstimateDepthStage(Stage):
             "depth_gray_8bit_path": str(depth_gray_path),
             "depth_gray_16bit_path": str(depth_gray16_path),
             "depth_color_path": str(depth_color_path),
-            "depth_object_pointcloud_path": str(pointcloud_png_path) if annotations_out else None,
-            "depth_object_pointcloud_summary_path": str(pointcloud_summary_path) if annotations_out else None,
+            "depth_object_pointcloud_path": str(pointcloud_png_path) if object_pointclouds else None,
+            "depth_object_pointcloud_summary_path": str(pointcloud_summary_path) if object_pointclouds else None,
+            "object_pointclouds": object_pointclouds,
             "global_depth_stats": {
                 "depth_min": float(depth.min()),
                 "depth_max": float(depth.max()),
