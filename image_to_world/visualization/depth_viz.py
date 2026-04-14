@@ -62,6 +62,7 @@ def render_depth_object_pointcloud(
     ]
 
     all_points = []
+    point_batches: list[tuple[np.ndarray, tuple[float, float, float], Any]] = []
     object_summaries = []
     for idx, obj in enumerate(object_pointclouds):
         pointcloud_path_raw = obj.get("pointcloud_path")
@@ -74,13 +75,9 @@ def render_depth_object_pointcloud(
         if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
             continue
         color = deterministic_color(idx)
-        for ax in axes:
-            ax.scatter(points[:, 0], points[:, 1], points[:, 2], s=3.5, color=[color], alpha=0.75, depthshade=False)
-        center = points.mean(axis=0)
-        for ax_idx, ax in enumerate(axes):
-            if ax_idx in (0, 1):
-                ax.text(center[0], center[1], center[2], f"[{obj.get('id', idx)}]", fontsize=7, color="black")
         all_points.append(points)
+        point_batches.append((points, color, obj.get("id", idx)))
+        center = points.mean(axis=0)
         object_summaries.append({
             "id": obj.get("id", idx),
             "class_name": obj.get("class_name"),
@@ -99,6 +96,37 @@ def render_depth_object_pointcloud(
         ax.view_init(elev=elev, azim=azim)
         if all_points:
             set_equal_limits_3d(ax, all_concat)
+            azim_rad = np.radians(float(azim))
+            elev_rad = np.radians(float(elev))
+            view_dir = np.array([
+                np.cos(elev_rad) * np.cos(azim_rad),
+                np.cos(elev_rad) * np.sin(azim_rad),
+                np.sin(elev_rad),
+            ], dtype=np.float64)
+            merged_points = []
+            merged_colors = []
+            for points, color, _ in point_batches:
+                merged_points.append(points.astype(np.float64))
+                merged_colors.append(np.tile(np.asarray(color, dtype=np.float64), (points.shape[0], 1)))
+            stacked_points = np.concatenate(merged_points, axis=0)
+            stacked_colors = np.concatenate(merged_colors, axis=0)
+            depth_metric = stacked_points @ view_dir
+            draw_order = np.argsort(depth_metric)
+            sorted_points = stacked_points[draw_order]
+            sorted_colors = stacked_colors[draw_order]
+            ax.scatter(
+                sorted_points[:, 0],
+                sorted_points[:, 1],
+                sorted_points[:, 2],
+                s=3.5,
+                c=sorted_colors,
+                alpha=0.75,
+                depthshade=True,
+            )
+            if title in ("Perspective", "Top"):
+                for points, _, obj_id in point_batches:
+                    center = points.mean(axis=0)
+                    ax.text(center[0], center[1], center[2], f"[{obj_id}]", fontsize=7, color="black")
 
     fig.suptitle("Depth Object Point Cloud", fontsize=16)
     fig.tight_layout()

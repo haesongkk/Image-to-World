@@ -52,30 +52,38 @@ class EstimateCameraStage(Stage):
         return np.linspace(0, count - 1, num=max_count, dtype=np.int32)
 
     @staticmethod
-    def rotation_x(angle_rad: float) -> np.ndarray:
-        c = math.cos(angle_rad)
-        s = math.sin(angle_rad)
-        return np.array([
-            [1.0, 0.0, 0.0],
-            [0.0, c, -s],
-            [0.0, s, c],
-        ], dtype=np.float64)
+    def rotate_points(
+        points: np.ndarray,
+        *,
+        pitch_deg: float = 0.0,
+        roll_deg: float = 0.0,
+        yaw_deg: float = 0.0,
+    ) -> np.ndarray:
+        pitch_rad = math.radians(float(pitch_deg))
+        roll_rad = math.radians(float(roll_deg))
+        yaw_rad = math.radians(float(yaw_deg))
 
-    @staticmethod
-    def rotation_z(angle_rad: float) -> np.ndarray:
-        c = math.cos(angle_rad)
-        s = math.sin(angle_rad)
-        return np.array([
-            [c, -s, 0.0],
-            [s, c, 0.0],
+        cp, sp = math.cos(pitch_rad), math.sin(pitch_rad)
+        cr, sr = math.cos(roll_rad), math.sin(roll_rad)
+        cy, sy = math.cos(yaw_rad), math.sin(yaw_rad)
+
+        rot_x = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, cp, -sp],
+            [0.0, sp, cp],
+        ], dtype=np.float64)
+        rot_z = np.array([
+            [cr, -sr, 0.0],
+            [sr, cr, 0.0],
             [0.0, 0.0, 1.0],
         ], dtype=np.float64)
-
-    @classmethod
-    def build_world_to_camera_rotation(cls, *, roll_deg: float, pitch_deg: float) -> np.ndarray:
-        pitch_vis_rad = math.radians(-pitch_deg)
-        roll_rad = math.radians(roll_deg)
-        return cls.rotation_z(roll_rad) @ cls.rotation_x(pitch_vis_rad)
+        rot_y = np.array([
+            [cy, 0.0, sy],
+            [0.0, 1.0, 0.0],
+            [-sy, 0.0, cy],
+        ], dtype=np.float64)
+        rot = rot_y @ rot_z @ rot_x
+        return (rot @ points.T).T
 
     @staticmethod
     def depth_to_camera_points(
@@ -94,13 +102,6 @@ class EstimateCameraStage(Stage):
         y_camera = -((ys.astype(np.float64) - float(cy)) / max(float(fy), 1e-6)) * z_camera
         return np.stack([x_camera, y_camera, z_camera], axis=1)
 
-    @classmethod
-    def camera_points_to_visual(cls, points_camera: np.ndarray, *, roll_deg: float, pitch_deg: float) -> np.ndarray:
-        rotation_world_to_camera = cls.build_world_to_camera_rotation(roll_deg=roll_deg, pitch_deg=pitch_deg)
-        rotation_camera_to_world = rotation_world_to_camera.T
-        points_world = (rotation_camera_to_world @ points_camera.T).T
-        return np.stack([points_world[:, 0], points_world[:, 2], points_world[:, 1]], axis=1)
-
     def build_object_pointclouds(
         self,
         *,
@@ -113,6 +114,7 @@ class EstimateCameraStage(Stage):
         cy0: float,
         pitch_deg: float,
         roll_deg: float,
+        yaw_deg: float,
         depth_scale: float,
     ) -> list[dict]:
         image_h, image_w = image_hw
@@ -148,7 +150,14 @@ class EstimateCameraStage(Stage):
                 cy=cy0,
                 depth_scale=depth_scale,
             )
-            points_xyz = self.camera_points_to_visual(points_camera, roll_deg=roll_deg, pitch_deg=pitch_deg)
+            # Test mode: apply inverse rotation using available Euler angles.
+            points_pitch_inv = self.rotate_points(
+                points_camera,
+                pitch_deg=-float(pitch_deg),
+                roll_deg=-float(roll_deg),
+                yaw_deg=-float(yaw_deg),
+            )
+            points_xyz = np.stack([points_pitch_inv[:, 0], points_pitch_inv[:, 2], points_pitch_inv[:, 1]], axis=1)
             pointcloud_path = output_dir / f"object_{int(obj_id):03d}.npy"
             np.save(pointcloud_path, points_xyz.astype(np.float32))
             pointclouds.append({
@@ -191,6 +200,7 @@ class EstimateCameraStage(Stage):
         cy0 = float(pred["cy"])
         pitch_deg = float(pred["pitch_deg"])
         roll_deg = float(pred["roll_deg"])
+        yaw_deg = 0.0
 
         preview_path = self.config.output_dir / "camera_preview.png"
         preview_summary_path = self.config.output_dir / "camera_preview_summary.json"
@@ -211,7 +221,7 @@ class EstimateCameraStage(Stage):
             "orientation": {
                 "pitch_deg": pitch_deg,
                 "roll_deg": roll_deg,
-                "yaw_deg": 0.0,
+                "yaw_deg": yaw_deg,
                 "horizon_y": float(pred["horizon_y"]),
                 "vanishing_point_xy": [cx0, float(pred["horizon_y"])],
             },
@@ -269,6 +279,7 @@ class EstimateCameraStage(Stage):
                     cy0=cy0,
                     pitch_deg=pitch_deg,
                     roll_deg=roll_deg,
+                    yaw_deg=yaw_deg,
                     depth_scale=float(payload["depth_context"].get("absolute_depth_scale_multiplier", 1.0)),
                 )
                 render_camera_calibrated_pointcloud(
