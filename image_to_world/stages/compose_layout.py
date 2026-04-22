@@ -135,9 +135,8 @@ class ComposeLayoutStage(Stage):
                 depth_value=float(cube_world["position_xyz"][2]),
                 pseudo_world=cube_world,
                 mesh=MeshArtifact(
-                    obj_path=mesh_ann.get("obj_path") if mesh_ann else None,
-                    ply_path=mesh_ann.get("ply_path") if mesh_ann else None,
-                    meta_path=str(Path(mesh_ann.get("obj_path", "")).with_name("meta.json")) if mesh_ann and mesh_ann.get("obj_path") else None,
+                    mesh_path=mesh_ann.get("mesh_path") if mesh_ann else None,
+                    mesh_format=mesh_ann.get("mesh_format") if mesh_ann else None,
                 ),
                 source_paths={
                     **object_ann.get("source_paths", {}),

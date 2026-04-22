@@ -64,9 +64,8 @@ class DepthAnnotation:
 
 @dataclass
 class MeshArtifact:
-    obj_path: Optional[str]
-    ply_path: Optional[str]
-    meta_path: Optional[str] = None
+    mesh_path: Optional[str] = None
+    mesh_format: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return _serialize(self)

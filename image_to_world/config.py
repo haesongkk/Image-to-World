@@ -53,16 +53,14 @@ class ObjectCompletionConfig:
 class MeshGenerationConfig:
     input_json_path: Path = field(default_factory=lambda: artifact_path("complete_objects", "amodal_result.json"))
     output_dir: Path = field(default_factory=lambda: artifact_path("generate_meshes"))
-    asset_pre_rot_euler_xyz_deg: list[float] = field(default_factory=lambda: [-90.0, 0.0, 0.0])
-    batch_size: int = 1
-    guidance_scale: float = 3.0
-    use_karras: bool = True
-    karras_steps: int = 64
-    sigma_min: float = 1e-3
-    sigma_max: float = 160.0
-    s_churn: int = 0
-    transmitter_name: str = "transmitter"
-    image_model_name: str = "image300M"
+    hunyuan_repo_dir: Path = field(default_factory=lambda: project_path("third_party", "Hunyuan3D-2"))
+    hunyuan_venv_python: Path = field(default_factory=lambda: project_path("third_party", "Hunyuan3D-2", ".venv", "Scripts", "python.exe"))
+    hunyuan_model_id: str = "tencent/Hunyuan3D-2"
+    hunyuan_output_format: str = "glb"
+    hunyuan_use_background_removal: bool = True
+    hunyuan_enable_texture: bool = False
+    hunyuan_texture_model_id: str = "tencent/Hunyuan3D-2"
+    hunyuan_texture_output_format: str = "glb"
 
 
 @dataclass
@@ -114,6 +112,8 @@ class SceneAssemblyConfig:
     visualization_image_size: int = 1400
     visualization_point_size: int = 2
     visualization_max_faces_per_object: int | None = 12000
+    mesh_converter_repo_dir: Path = field(default_factory=lambda: project_path("third_party", "Hunyuan3D-2"))
+    mesh_converter_python: Path = field(default_factory=lambda: project_path("third_party", "Hunyuan3D-2", ".venv", "Scripts", "python.exe"))
     object_color_palette: list[tuple[float, float, float]] = field(default_factory=lambda: [
         (0.90, 0.25, 0.25), (0.25, 0.55, 0.95), (0.20, 0.75, 0.35), (0.95, 0.70, 0.20),
         (0.65, 0.35, 0.90), (0.20, 0.80, 0.80), (0.95, 0.45, 0.70), (0.60, 0.60, 0.20),

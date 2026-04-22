@@ -8,16 +8,11 @@ from diffusers import AutoPipelineForInpainting
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation, AutoModelForZeroShotObjectDetection, AutoProcessor
 
-from image_to_world.config import DepthEstimationConfig, MaskGenerationConfig, MeshGenerationConfig, ObjectCompletionConfig, TagExtractionConfig
-from image_to_world.geometry import rotation_matrix_xyz_deg
+from image_to_world.config import DepthEstimationConfig, MaskGenerationConfig, ObjectCompletionConfig, TagExtractionConfig
 from ram import inference_ram as inference
 from ram.models import ram_plus
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-from shap_e.diffusion.gaussian_diffusion import diffusion_from_config
-from shap_e.diffusion.sample import sample_latents
-from shap_e.models.download import load_config, load_model
-from shap_e.util.notebooks import decode_latent_mesh
 
 
 class RamTagger:
@@ -99,45 +94,6 @@ class SdxlInpainter:
     def inpaint(self, *, prompt: str, image, mask_image, **kwargs):
         pipe = self._load()
         return pipe(prompt=prompt, image=image, mask_image=mask_image, **kwargs).images[0]
-
-
-class ShapEGenerator:
-    def __init__(self, config: MeshGenerationConfig, device: str) -> None:
-        self.config = config
-        self.device = torch.device(device)
-        self._transmitter = None
-        self._model = None
-        self._diffusion = None
-
-    def _load(self):
-        if self._transmitter is None:
-            self._transmitter = load_model(self.config.transmitter_name, device=self.device)
-            self._model = load_model(self.config.image_model_name, device=self.device)
-            self._diffusion = diffusion_from_config(load_config("diffusion"))
-        return self._transmitter, self._model, self._diffusion
-
-    def generate_mesh(self, image, **kwargs):
-        transmitter, model, diffusion = self._load()
-        latents = sample_latents(
-            batch_size=self.config.batch_size,
-            model=model,
-            diffusion=diffusion,
-            guidance_scale=self.config.guidance_scale,
-            model_kwargs=dict(images=[image] * self.config.batch_size),
-            progress=True,
-            clip_denoised=True,
-            use_fp16=(self.device.type == "cuda"),
-            use_karras=self.config.use_karras,
-            karras_steps=self.config.karras_steps,
-            sigma_min=self.config.sigma_min,
-            sigma_max=self.config.sigma_max,
-            s_churn=self.config.s_churn,
-        )
-        mesh = decode_latent_mesh(transmitter, latents[0]).tri_mesh()
-        rot = rotation_matrix_xyz_deg(self.config.asset_pre_rot_euler_xyz_deg)
-        verts = np.asarray(mesh.verts, dtype=np.float64)
-        mesh.verts = (rot @ verts.T).T
-        return mesh
 
 
 class ConfigurableDepthEstimator:

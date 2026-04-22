@@ -3,9 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from PIL import Image
-
-from image_to_world.adapters.defaults import ShapEGenerator
+from image_to_world.adapters.hunyuan_external import HunyuanExternalGenerator
 from image_to_world.cache import CacheStore
 from image_to_world.common import load_json, save_json
 from image_to_world.config import MeshGenerationConfig, RuntimeConfig
@@ -21,7 +19,7 @@ class GenerateMeshesStage(Stage):
         super().__init__(manifest=manifest, cache=cache)
         self.config = config
         self.runtime = runtime
-        self.adapter = ShapEGenerator(config, runtime.device)
+        self.adapter = HunyuanExternalGenerator(config)
 
     def run(self) -> StageResult:
         output_path = self.config.output_dir / "gen3d_result.json"
@@ -41,27 +39,34 @@ class GenerateMeshesStage(Stage):
                 continue
             obj_dir = self.config.output_dir / f"object_{obj_id:02d}"
             obj_dir.mkdir(parents=True, exist_ok=True)
-            mesh = self.adapter.generate_mesh(Image.open(image_path).convert("RGB"))
-            obj_path = obj_dir / f"object_{obj_id:02d}.obj"
-            ply_path = obj_dir / f"object_{obj_id:02d}.ply"
-            with obj_path.open("w", encoding="utf-8") as handle:
-                mesh.write_obj(handle)
-            with ply_path.open("wb") as handle:
-                mesh.write_ply(handle)
+            shape_output_path = obj_dir / f"object_{obj_id:02d}_shape.{self.config.hunyuan_output_format.lstrip('.')}"
+            texture_output_path = obj_dir / f"object_{obj_id:02d}_textured.{self.config.hunyuan_texture_output_format.lstrip('.')}"
+            mesh_output = self.adapter.generate_mesh(
+                image_path=image_path,
+                shape_output_path=shape_output_path,
+                texture_output_path=texture_output_path,
+            )
             meta = {
                 "id": obj_id,
                 "class_name": ann["class_name"],
                 "input_image_path": str(image_path),
-                "obj_path": str(obj_path),
-                "ply_path": str(ply_path),
-                "guidance_scale": self.config.guidance_scale,
-                "karras_steps": self.config.karras_steps,
+                "mesh_path": mesh_output["mesh_path"],
+                "mesh_format": mesh_output["mesh_format"],
+                "shape_mesh_path": mesh_output.get("shape_mesh_path"),
+                "shape_mesh_format": mesh_output.get("shape_mesh_format"),
+                "textured_mesh_path": mesh_output.get("textured_mesh_path"),
+                "textured_mesh_format": mesh_output.get("textured_mesh_format"),
                 "device": self.runtime.device,
-                "model_name": self.config.image_model_name,
-                "transmitter_name": self.config.transmitter_name,
-                "asset_pre_rotation_euler_xyz_deg": self.config.asset_pre_rot_euler_xyz_deg,
+                "model_backend": "hunyuan3d_2",
+                "model_id": self.config.hunyuan_model_id,
+                "texture_enabled": self.config.hunyuan_enable_texture,
+                "texture_model_id": self.config.hunyuan_texture_model_id if self.config.hunyuan_enable_texture else None,
+                "hunyuan_repo_dir": str(self.config.hunyuan_repo_dir),
+                "hunyuan_venv_python": str(self.config.hunyuan_venv_python),
+                "background_removal": self.config.hunyuan_use_background_removal,
             }
-            save_json(obj_dir / "meta.json", meta)
+            meta_path = obj_dir / "meta.json"
+            save_json(meta_path, meta)
             all_results.append(meta)
 
         save_json(output_path, {
@@ -79,13 +84,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default=None)
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--enable-texture", action="store_true")
+    parser.add_argument("--texture-model-id", default=None)
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
     runtime = RuntimeConfig(device=args.device or RuntimeConfig().device, skip_existing=args.skip_existing, overwrite=args.overwrite)
-    stage = GenerateMeshesStage(config=MeshGenerationConfig(), runtime=runtime, manifest=ManifestStore(), cache=CacheStore())
+    config = MeshGenerationConfig()
+    if args.enable_texture:
+        config.hunyuan_enable_texture = True
+    if args.texture_model_id:
+        config.hunyuan_texture_model_id = args.texture_model_id
+    stage = GenerateMeshesStage(config=config, runtime=runtime, manifest=ManifestStore(), cache=CacheStore())
     stage.run()
 
 
