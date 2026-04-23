@@ -57,6 +57,16 @@ class ComposeLayoutStage(Stage):
             return None
         return points.astype(np.float64)
 
+    @staticmethod
+    def normalize_point_order(points_xyz: np.ndarray, point_order: str | None) -> np.ndarray:
+        # Backward compatibility: historical artifacts stored points in XZY order.
+        order = str(point_order or "xzy").lower()
+        if order == "xyz":
+            return points_xyz
+        if order == "xzy":
+            return points_xyz[:, [0, 2, 1]]
+        return points_xyz
+
     def fit_axis_aligned_box(self, points_xyz: np.ndarray) -> dict[str, object] | None:
         if points_xyz.shape[0] < self.MIN_POINT_COUNT:
             return None
@@ -119,6 +129,7 @@ class ComposeLayoutStage(Stage):
             if points_xyz is None:
                 skipped.append({"id": obj_id, "class_name": label, "reason": f"pointcloud missing or invalid: {pointcloud_path}"})
                 continue
+            points_xyz = self.normalize_point_order(points_xyz, object_ann.get("point_order"))
             cube_world = self.fit_axis_aligned_box(points_xyz)
             if cube_world is None:
                 skipped.append({"id": obj_id, "class_name": label, "reason": "insufficient valid pointcloud samples"})

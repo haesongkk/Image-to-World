@@ -428,6 +428,18 @@ def render_camera_calibrated_pointcloud(
     png_path: Path,
     summary_path: Path,
 ) -> None:
+    def normalize_point_order(points_xyz: np.ndarray, point_order: str | None) -> np.ndarray:
+        # Backward compatibility: historical artifacts stored points in XZY order.
+        order = str(point_order or "xzy").lower()
+        if order == "xyz":
+            return points_xyz
+        if order == "xzy":
+            return points_xyz[:, [0, 2, 1]]
+        return points_xyz
+
+    def to_visual_xyz(points_xyz: np.ndarray) -> np.ndarray:
+        return np.stack([points_xyz[:, 0], points_xyz[:, 2], points_xyz[:, 1]], axis=1)
+
     fig = plt.figure(figsize=(16, 12))
     axes = [
         fig.add_subplot(2, 2, 1, projection="3d"),
@@ -455,17 +467,22 @@ def render_camera_calibrated_pointcloud(
         points = np.load(pointcloud_path)
         if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
             continue
+        points_world = normalize_point_order(points.astype(np.float64), obj.get("point_order"))
+        points_visual = to_visual_xyz(points_world)
         color = deterministic_color(idx)
-        center = points.mean(axis=0)
-        all_points.append(points)
-        point_batches.append((points, color, obj.get("id", idx)))
+        center_world = points_world.mean(axis=0)
+        center_visual = points_visual.mean(axis=0)
+        all_points.append(points_visual)
+        point_batches.append((points_visual, color, obj.get("id", idx)))
         object_summaries.append({
             "id": obj.get("id", idx),
             "class_name": obj.get("class_name"),
-            "num_points": int(points.shape[0]),
+            "num_points": int(points_world.shape[0]),
             "color_rgb": list(color),
-            "center_xyz": center.tolist(),
+            "center_world_xyz": center_world.tolist(),
+            "center_visual_xzy": center_visual.tolist(),
             "pointcloud_path": str(pointcloud_path),
+            "point_order": "xyz",
         })
 
     all_concat = np.concatenate(all_points, axis=0) if all_points else np.empty((0, 3), dtype=np.float64)

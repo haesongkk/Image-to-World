@@ -157,7 +157,8 @@ class EstimateCameraStage(Stage):
                 roll_deg=-float(roll_deg),
                 yaw_deg=-float(yaw_deg),
             )
-            points_xyz = np.stack([points_pitch_inv[:, 0], points_pitch_inv[:, 2], points_pitch_inv[:, 1]], axis=1)
+            # Canonical world coordinate order is XYZ.
+            points_xyz = np.stack([points_pitch_inv[:, 0], points_pitch_inv[:, 1], points_pitch_inv[:, 2]], axis=1)
             pointcloud_path = output_dir / f"object_{int(obj_id):03d}.npy"
             np.save(pointcloud_path, points_xyz.astype(np.float32))
             pointclouds.append({
@@ -166,6 +167,7 @@ class EstimateCameraStage(Stage):
                 "score": ann.get("score"),
                 "bbox_xyxy": ann.get("bbox_xyxy"),
                 "pointcloud_path": str(pointcloud_path),
+                "point_order": "xyz",
                 "point_count": int(points_xyz.shape[0]),
                 "bounds_min_xyz": points_xyz.min(axis=0).tolist(),
                 "bounds_max_xyz": points_xyz.max(axis=0).tolist(),
@@ -243,6 +245,7 @@ class EstimateCameraStage(Stage):
                     "y": "up after roll/pitch correction",
                     "z": "forward from the camera using absolute depth",
                 },
+                "pointcloud_axis_order": "xyz",
                 "notes": [
                     "Single-image reconstruction in this project uses the camera-origin frame as the scene/world frame.",
                     "compose_layout consumes object point clouds already expressed in this frame.",
