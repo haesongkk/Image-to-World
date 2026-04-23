@@ -19,26 +19,13 @@
 ## 개발 환경
 
 - 언어: Python 3.11
-- 실행 환경: PyTorch 기반 (`cuda`/`cpu` 선택 가능, GPU 사용 권장)
-- 권장 환경 관리: 프로젝트 로컬 가상환경(`.venv`)
-- 외부 의존 리포지토리: `Grounded-SAM-2`, `shap-e`, `external/PerspectiveFields`
+- 실행 환경: 
+- 외부 의존 리포지토리: 
 - 필수 가중치/체크포인트:
-  - `Grounded-SAM-2/checkpoints/sam2.1_hiera_large.pt`
-  - `external/PerspectiveFields/models/paramnet_360cities_edina_rpfpp.pth`
 
 ## 실행 방법
 
-### 1. 입력 이미지 준비
-
-입력 이미지를 아래 경로에 둡니다.
-
-```bash
-artifacts/raw_image.jpg
-```
-
-기본 설정은 [image_to_world/config.py](image_to_world/config.py)에 모여 있습니다. 입력 경로, 모델 ID, threshold, depth/layout heuristic은 이 파일에서 조정합니다.
-
-### 2. 전체 파이프라인 실행
+### 전체 파이프라인 실행
 
 전체 pipeline을 처음부터 끝까지 실행합니다.
 
@@ -65,23 +52,8 @@ python run_pipeline.py --skip-existing
 python run_pipeline.py --overwrite
 ```
 
-### 3. 특정 구간만 실행
+### 개별 stage 실행
 
-예를 들어 mask 이후부터 assembly까지 다시 돌리고 싶다면:
-
-```bash
-python run_pipeline.py --from generate_masks --to assemble_scene
-```
-
-depth 이후만 다시 보고 싶다면:
-
-```bash
-python run_pipeline.py --from estimate_depth --to assemble_scene
-```
-
-### 4. 개별 stage 실행
-
-현재는 루트의 `01_tag.py` 같은 래퍼 파일 대신, stage 모듈을 직접 실행하는 구조입니다.
 
 ```bash
 python -m image_to_world.stages.extract_tags
@@ -100,43 +72,9 @@ python -m image_to_world.stages.assemble_scene
 --skip-existing
 --overwrite
 ```
-
-## 구현 현황
-
-- [x] 객체별 마스크 추출
-- [x] 객체별 3D mesh 생성
-- [x] 객체별 transform 계산
-- [x] 단일 OBJ/MTL로 scene assembly
-
-- [x] depth 결과 point cloud 시각화 추가
-- [x] 카메라 추정 stage 추가 및 파이프라인 연결 
-- [x] 카메라/깊이/레이아웃/어셈블리 시각화 흐름 연동
-- [x] depth 모델 전환: relative -> absolute
-- [x] 객체 배치 로직 개선
-
-- [ ] 텍스처 지원 가능한 3D 생성 모델 검토
-- [ ] 3D mesh의 noise와 과도한 geometry를 줄이는 후처리 추가
-- [ ] inpaint 및 mesh 생성 단계 속도 개선 (모델 교체 또는 수치 조정) 
-
-- [ ] 카메라 왜곡 보정 후 월드좌표계 변환 시각화
-- [ ] 객체 마스크 필터링 규칙 (기존 태그 직접 필터링 방식 제거)
-- [ ] 객체 위치,회전,크기 계산 규칙 다시 생각해야함 (depth mask만을 이용한 방식의 한계)
-
-- [ ] 배경/구조물 복원
-- [ ] 배치 이상치 정밀 보정 (공중에 뜨거나 서로 겹치는 등의 현상)
-- [ ] 입력 이미지와 비교하여 객체 배치 정밀 보정
-
-- [ ] 외부 라이브러리 의존성 관리 (git clone, pip install git 혼용 중)
-- [ ] 체크포인트 경로 정리
-- [ ] 산출물 경로 정리
-- [ ] image-to-world 폴더 이름 `src` 로 변경
-
-- [ ] OBJ export 축 정합 이슈 정리 (현재 X-mirror 임시 호환 처리 제거 방향 확정)
-- [ ] 카메라 추정 실패 케이스 예외 처리 및 로그 보강
-- [ ] `compose_layout` -> `assemble_scene` 경계 데이터 규칙 정리 (`primitive`/`mesh` fallback)
-- [ ] 시각화 산출물(camera/depth/layout/assembly) 포맷/저장 규칙 문서화
-
 ## 결과물
+
+[`2026-04-24` : 3D 메쉬 생성 모델 변경](./doc/260424/260424.md)
 
 [`2026-04-10` : 객체 배치 정확도 개선](./doc/260409/260409.md)
 
@@ -145,42 +83,7 @@ python -m image_to_world.stages.assemble_scene
 
 ## 기술 스택
 
-### Core
 
-- Python
-- PyTorch
-- NumPy
-- Pillow
-- OpenCV
-- Transformers
-- Diffusers
-- Matplotlib
-
-### Vision / Segmentation
-
-- RAM++
-- Grounding DINO
-- SAM2
-
-### Generative Modeling
-
-- Stable Diffusion XL Inpainting
-- Shap-E
-
-### Depth / Camera / Geometry / Scene Assembly
-
-- DepthPro (`apple/DepthPro-hf`) 기반 absolute depth
-- Perspective Fields 기반 camera parameter estimation
-- camera + depth 기반 pseudo-world object placement
-- OBJ / MTL assembly pipeline
-
-### Project Structure
-
-- modular stage pipeline
-- dataclass-based config and schema organization
-- artifact manifest and cache tracking
-- stage별 preview/diagnostic visualization outputs
-- unittest-based lightweight validation
 
 ## 참고 자료
 
@@ -192,3 +95,4 @@ python -m image_to_world.stages.assemble_scene
 - [PixARMesh: Autoregressive Mesh-Native Single-View Scene Reconstruction](https://arxiv.org/html/2603.05888v1)
 - [Gen3DSR: Generalizable 3D Scene Reconstruction via Divide and Conquer from a Single View](https://arxiv.org/html/2404.03421v2)
 - [Open-World Amodal Appearance Completion](https://arxiv.org/html/2411.13019v1)
+- [TEASER: Fast and Certifiable Point Cloud Registration](https://arxiv.org/abs/2001.07715)
