@@ -40,6 +40,12 @@ class AssembleSceneStage(Stage):
                 mesh_path = None
                 mesh_format = ""
             pseudo = placement.get("pseudo_world", {})
+            # Temporary workaround requested by user:
+            # invert Z translation sign during assembly.
+            pos_xyz = list(pseudo.get("position_xyz", [0.0, 0.0, 0.0]))
+            if len(pos_xyz) < 3:
+                pos_xyz = [0.0, 0.0, 0.0]
+            pos_xyz[2] = -float(pos_xyz[2])
             if mesh_path and mesh_format:
                 assembly_records.append({
                     "kind": "mesh",
@@ -47,7 +53,7 @@ class AssembleSceneStage(Stage):
                     "mesh_format": mesh_format,
                     "scale_xyz": pseudo.get("scale_xyz", [1.0, 1.0, 1.0]),
                     "rotation_euler_xyz_deg": pseudo.get("rotation_euler_xyz_deg", [0.0, 0.0, 0.0]),
-                    "position_xyz": pseudo.get("position_xyz", [0.0, 0.0, 0.0]),
+                    "position_xyz": pos_xyz,
                     "global_pre_rot_euler_deg": self.config.global_pre_rot_euler_deg,
                     "normalize_mesh_to_unit_box": self.config.normalize_mesh_to_unit_box,
                     "placement_id": placement.get("id"),
@@ -58,7 +64,7 @@ class AssembleSceneStage(Stage):
                     "kind": "cube",
                     "scale_xyz": pseudo.get("scale_xyz", [1.0, 1.0, 1.0]),
                     "rotation_euler_xyz_deg": pseudo.get("rotation_euler_xyz_deg", [0.0, 0.0, 0.0]),
-                    "position_xyz": pseudo.get("position_xyz", [0.0, 0.0, 0.0]),
+                    "position_xyz": pos_xyz,
                     "global_pre_rot_euler_deg": self.config.global_pre_rot_euler_deg,
                     "normalize_mesh_to_unit_box": False,
                     "placement_id": placement.get("id"),
