@@ -31,8 +31,7 @@ class MaskGenerationConfig:
     image_path: Path = field(default_factory=lambda: artifact_path("raw_image.jpg"))
     prompt_path: Path = field(default_factory=lambda: artifact_path("extract_tags", "ram_result.json"))
     output_dir: Path = field(default_factory=lambda: artifact_path("generate_masks"))
-    sam2_config: Path = field(default_factory=lambda: project_path("Grounded-SAM-2", "sam2", "configs", "sam2.1", "sam2.1_hiera_l.yaml"))
-    sam2_checkpoint: Path = field(default_factory=lambda: project_path("Grounded-SAM-2", "checkpoints", "sam2.1_hiera_large.pt"))
+    sam2_model_id: str = "facebook/sam2-hiera-large"
     box_threshold: float = 0.35
     text_threshold: float = 0.25
     grounding_model_id: str = "IDEA-Research/grounding-dino-tiny"

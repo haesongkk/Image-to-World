@@ -67,8 +67,6 @@ class GenerateMasksStage(Stage):
         self.ensure_output_dir(self.config.output_dir)
         require_file(self.config.image_path, "Image file")
         require_file(self.config.prompt_path, "Prompt JSON")
-        require_file(self.config.sam2_config, "SAM2 config")
-        require_file(self.config.sam2_checkpoint, "SAM2 checkpoint")
 
         tags = load_json(self.config.prompt_path)
         text_prompt = " . ".join(tags)
