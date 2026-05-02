@@ -69,13 +69,25 @@ git clone https://github.com/apple/ml-depth-pro.git
 cd ml-depth-pro
 py -3.9 -m venv .venv
 .venv\Scripts\activate
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install -e .
 
-bash get_pretrained_models.sh
-
-or
-
 mkdir checkpoints
-curl.exe -L --progress-bar -o "https://ml-site.cdn-apple.com/models/depth-pro/depth_pro.pt" "checkpoints\depth_pro.pt"
+curl.exe -L --progress-bar -o "checkpoints\depth_pro.pt" "https://ml-site.cdn-apple.com/models/depth-pro/depth_pro.pt"
+```
+
+---
+
+#### INSTALL PerspectiveFields
+
+```
+git clone https://github.com/jinlinyi/PerspectiveFields.git
+
+cd .\PerspectiveFields\
+py -3.9 -m venv .venv
+.venv\Scripts\activate
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+$env:PYTHONUTF8="1"
+pip install -e .
+pip install imageio
 ```
