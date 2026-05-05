@@ -12,10 +12,8 @@ def make_mask(image_path: Path):
     grounded_sam_2_results_path = project_root / "output" / "Grounded-SAM-2" / "grounded_sam2_hf_model_demo_results.json"
     output_dir = project_root / "output" / "mask"
     os.makedirs(output_dir, exist_ok=True)
-
-    image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-    if image is None:
-        raise FileNotFoundError(f"Failed to read image: {image_path}")
+    input_image_path = project_root / "output" / "BirefNet" / f"{image_path.stem}_birefnet.png"
+    image = cv2.imread(str(input_image_path), cv2.IMREAD_COLOR)
 
     with open(grounded_sam_2_results_path, "r", encoding="utf-8") as f:
         infer_results = json.load(f)

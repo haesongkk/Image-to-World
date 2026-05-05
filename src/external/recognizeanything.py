@@ -9,6 +9,7 @@ def run_recognizeanything(image_path: Path):
     venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
     inference_script = repo_root / "inference_ram_plus.py"
 
+    input_image_path = project_root / "output" / "BirefNet" / f"{image_path.stem}_birefnet.png"
     output_dir  = project_root / "output" / "recognize-anything" 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -22,7 +23,7 @@ def run_recognizeanything(image_path: Path):
         [
             str(venv_python),
             str(inference_script),
-            "--image", str(image_path),
+            "--image", str(input_image_path),
         ],
         capture_output=True,
         text=True,
