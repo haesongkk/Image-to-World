@@ -91,3 +91,33 @@ $env:PYTHONUTF8="1"
 pip install -e .
 pip install imageio
 ```
+
+---
+
+#### INSTALL PyTorch3D (WSL Ubuntu)
+
+```
+cd /mnt/d/Image-to-World/third_party
+git clone https://github.com/facebookresearch/pytorch3d.git
+
+cd /mnt/d/Image-to-World/third_party/pytorch3d
+python3 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip setuptools wheel packaging
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install ninja iopath fvcore
+pip install -e . --no-build-isolation
+
+python - <<'PY'
+import torch
+import pytorch3d
+print(torch.__version__)
+print(torch.cuda.is_available())
+print(pytorch3d.__version__)
+PY
+```
+
+Notes:
+- This project was verified with `torch==2.5.1+cu121`, `pytorch3d==0.7.9` on WSL.
+- If you need Python 3.10/3.11, install that interpreter first and recreate `.venv`.
