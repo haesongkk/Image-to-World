@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 import math
@@ -22,7 +23,18 @@ def make_raw_transform(image_path: Path):
         transform.append([x, y, z, depth, width, height, rot_deg, rot_deg, rot_deg])
 
     transform = np.stack(transform, axis=0)
-    np.save(output_dir / "raw_transform.npy", transform)
+    payload = {
+        "transforms": [
+            {
+                "translation": {"x": float(tr[0]), "y": float(tr[1]), "z": float(tr[2])},
+                "scale": {"x": float(tr[3]), "y": float(tr[4]), "z": float(tr[5])},
+                "rotation_deg": {"x": float(tr[6]), "y": float(tr[7]), "z": float(tr[8])},
+            }
+            for tr in transform
+        ]
+    }
+    with open(output_dir / "raw_transform.json", "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
     fig = plt.figure(figsize=(16, 12))
     axes = [

@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import math
 
 import numpy as np
 import trimesh
+
+_S_TO_P = np.array(
+    [
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+    ],
+    dtype=np.float32,
+)
 
 
 def _load_mesh(glb_path: Path) -> trimesh.Trimesh:
@@ -34,29 +44,92 @@ def _euler_xyz_deg_to_rot(rx_deg: float, ry_deg: float, rz_deg: float) -> np.nda
     return rz_m @ ry_m @ rx_m
 
 
+def _rot_to_euler_xyz_deg(r: np.ndarray) -> tuple[float, float, float]:
+    sy = float(-r[2, 0])
+    sy = max(-1.0, min(1.0, sy))
+    ry = math.asin(sy)
+    cy = math.cos(ry)
+    if abs(cy) > 1e-6:
+        rx = math.atan2(float(r[2, 1]), float(r[2, 2]))
+        rz = math.atan2(float(r[1, 0]), float(r[0, 0]))
+    else:
+        rz = 0.0
+        rx = math.atan2(float(-r[0, 1]), float(r[1, 1]))
+    return math.degrees(rx), math.degrees(ry), math.degrees(rz)
+
+
+def _load_transform_json(path: Path) -> np.ndarray:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    rows = data["transforms"] if isinstance(data, dict) and "transforms" in data else data
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        packed = []
+        for row in rows:
+            t = row.get("translation", {})
+            s = row.get("scale", {})
+            r = row.get("rotation_deg", row.get("rotation", {}))
+            t_s = np.array(
+                [float(t.get("x", 0.0)), float(t.get("y", 0.0)), float(t.get("z", 0.0))],
+                dtype=np.float32,
+            )
+            s_s = np.array(
+                [float(s.get("x", 1.0)), float(s.get("y", 1.0)), float(s.get("z", 1.0))],
+                dtype=np.float32,
+            )
+            r_s = _euler_xyz_deg_to_rot(
+                float(r.get("x", 0.0)),
+                float(r.get("y", 0.0)),
+                float(r.get("z", 0.0)),
+            )
+
+            t_p = _S_TO_P @ t_s
+            s_p = np.array([s_s[1], s_s[2], s_s[0]], dtype=np.float32)  # (y, z, x)
+            r_p = _S_TO_P @ r_s @ _S_TO_P.T
+            rx_p, ry_p, rz_p = _rot_to_euler_xyz_deg(r_p)
+            packed.append([
+                float(t_p[0]), float(t_p[1]), float(t_p[2]),
+                float(s_p[0]), float(s_p[1]), float(s_p[2]),
+                float(rx_p), float(ry_p), float(rz_p),
+            ])
+        arr = np.asarray(packed, dtype=np.float32)
+    else:
+        arr = np.asarray(rows, dtype=np.float32)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    return arr
+
+
 def make_scene_glb(image_path: Path) -> None:
     image_path = Path(image_path).resolve()
     project_root = Path(__file__).resolve().parent.parent.parent
 
     mesh_dir = project_root / "output" / "Hunyuan3D-2"
-    transform_path = project_root / "output" / "fitted_transform" / "fitted_transform.npy"
+    transform_candidates = [
+        project_root / "output" / "raw_transform" / "raw_transform.json",
+        project_root / "output" / "fitted_transform" / "fitted_transform.json",
+        project_root / "output" / "fitted_transform_debug" / image_path.stem / "fitted_transform.json",
+        project_root / "output" / "fitted_transform_debug" / image_path.stem / "simple" / "fitted_transform.json",
+    ]
+    transform_path = next((p for p in transform_candidates if p.exists()), transform_candidates[0])
     output_dir = project_root / "output" / "scene"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not mesh_dir.exists():
         raise RuntimeError(f"Hunyuan3D-2 output directory not found: {mesh_dir}")
     if not transform_path.exists():
-        raise RuntimeError(f"Fitted transform file not found: {transform_path}")
+        raise RuntimeError(f"Transform file not found: {transform_path}")
 
-    glb_paths = sorted(mesh_dir.glob("*_final_textured_mesh.glb"))
+    glb_paths = (
+        sorted(mesh_dir.glob("*_remesh.glb"))
+        or sorted(mesh_dir.glob("*_shape_mesh.glb"))
+        or sorted(mesh_dir.glob("*_final_textured_mesh.glb"))
+    )
     if not glb_paths:
         raise RuntimeError(f"No final textured mesh GLB files found in: {mesh_dir}")
 
-    transforms = np.load(transform_path).astype(np.float32)
-    if transforms.ndim == 1:
-        transforms = transforms.reshape(1, -1)
+    transforms = _load_transform_json(transform_path)
     if transforms.shape[1] < 9:
-        raise RuntimeError(f"Invalid fitted_transform shape (expected [N, >=9]): {transforms.shape}")
+        raise RuntimeError(f"Invalid transform shape (expected [N, >=9]): {transforms.shape}")
 
     object_count = min(len(glb_paths), transforms.shape[0])
     if object_count == 0:
@@ -81,4 +154,3 @@ def make_scene_glb(image_path: Path) -> None:
     out_path = output_dir / f"{image_path.stem}_assembled.glb"
     scene.export(out_path)
     print(f"saved {out_path}")
-

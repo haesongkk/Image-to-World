@@ -20,7 +20,9 @@ def make_fitted_transform(image_path: Path):
     image_path = Path(image_path).resolve()
     project_root = Path(__file__).resolve().parent.parent.parent
     output_root = project_root / "output" / "fitted_transform_debug" / image_path.stem
+    canonical_output_dir = project_root / "output" / "fitted_transform"
     output_root.mkdir(parents=True, exist_ok=True)
+    canonical_output_dir.mkdir(parents=True, exist_ok=True)
 
     wsl_python = project_root / "third_party" / "pytorch3d" / ".venv" / "bin" / "python"
     wsl_script = project_root / "src" / "tool" / "fitted_transform_wsl.py"
@@ -41,18 +43,21 @@ def make_fitted_transform(image_path: Path):
         (
             f"cd '{wsl_project_root}' && "
             f"'{wsl_python_path}' '{wsl_script_path}' "
-            f"--project-root '{wsl_project_root}' "
-            f"--image-path '{wsl_image_path}' "
-            f"--device cuda --use-fitted-init --run-name '{run_name}' "
-            "--steps 400 --image-size 256 --save-every 50 "
-            "--faces-pp 24 --final-faces-pp 64 "
-            "--prefer-fit-mesh --auto-create-fit-mesh --fit-face-count 5000"
+            f"'{wsl_project_root}' "
+            f"'{wsl_image_path}' "
+            f"'{run_name}'"
         ),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    stdout = result.stdout.strip()
-    stderr = result.stderr.strip()
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
     if result.returncode != 0:
         raise RuntimeError(f"WSL differentiable rendering failed (code={result.returncode}): {stderr[-2000:]}")
 
@@ -64,9 +69,13 @@ def make_fitted_transform(image_path: Path):
     else:
         meta = json.loads(stdout.splitlines()[-1]) if stdout else {"stdout": stdout, "stderr": stderr}
 
-    for name in ["render_ref.png", "render_ref.npy", "target_ref.png", "fitted_transform.npy", "render_meta.json"]:
+    for name in ["render_ref.png", "render_ref.npy", "target_ref.png", "fitted_transform.json", "render_meta.json"]:
         src = run_dir / name
         if src.exists():
             shutil.copy2(src, output_root / name)
+
+    fitted_src = run_dir / "fitted_transform.json"
+    if fitted_src.exists():
+        shutil.copy2(fitted_src, canonical_output_dir / "fitted_transform.json")
 
     return meta
