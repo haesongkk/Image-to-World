@@ -103,6 +103,7 @@ def make_scene_glb(image_path: Path) -> None:
     image_path = Path(image_path).resolve()
     project_root = Path(__file__).resolve().parent.parent.parent
 
+    remesh_dir = project_root / "output" / "remesh"
     mesh_dir = project_root / "output" / "Hunyuan3D-2"
     transform_candidates = [
         project_root / "output" / "raw_transform" / "raw_transform.json",
@@ -114,18 +115,20 @@ def make_scene_glb(image_path: Path) -> None:
     output_dir = project_root / "output" / "scene"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not mesh_dir.exists():
-        raise RuntimeError(f"Hunyuan3D-2 output directory not found: {mesh_dir}")
     if not transform_path.exists():
         raise RuntimeError(f"Transform file not found: {transform_path}")
 
     glb_paths = (
-        sorted(mesh_dir.glob("*_remesh.glb"))
+        sorted(remesh_dir.glob("*_remeshed.glb"))
+        or sorted(mesh_dir.glob("*_remeshed.glb"))
+        or sorted(mesh_dir.glob("*_remesh.glb"))
         or sorted(mesh_dir.glob("*_shape_mesh.glb"))
         or sorted(mesh_dir.glob("*_final_textured_mesh.glb"))
     )
     if not glb_paths:
-        raise RuntimeError(f"No final textured mesh GLB files found in: {mesh_dir}")
+        raise RuntimeError(
+            f"No mesh GLB files found in remesh/Hunyuan outputs: {remesh_dir}, {mesh_dir}"
+        )
 
     transforms = _load_transform_json(transform_path)
     if transforms.shape[1] < 9:

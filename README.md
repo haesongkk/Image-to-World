@@ -1,77 +1,88 @@
 ﻿# Image-to-World
 
-단일 이미지를 입력으로 받아 객체 단위로 장면을 분해하고, 각 객체의 3D 자산과 깊이 정보를 추정한 뒤 하나의 scene으로 다시 조합하는 modular reconstruction pipeline입니다.
-
 ## 프로젝트 개요
 
-### 문제 정의
+## 결과물
 
-단일 이미지에서 바로 완성된 3D indoor scene을 복원하는 것은 여전히 어렵습니다. 특히 다음 문제가 한 번에 얽혀 있습니다.
+### 입력 이미지
 
-- 어떤 객체가 장면 안에 있는지 식별해야 함
-- 객체별 마스크와 가려진 영역을 분리해야 함
-- 객체의 대략적인 3D 형상을 복원해야 함
-- 상대적 depth를 바탕으로 장면 안의 배치를 추정해야 함
-- 최종적으로 하나의 scene mesh로 조합해야 함
+![원본 이미지](./doc/260505/raw_image.jpg)
 
-이 프로젝트는 이 문제를 여러 단계로 나누어 풀고 있습니다.
+### 출력 GLB 스크린샷
 
-## 개발 환경
+![블렌더 스크린샷](./doc/260505/screenshot.png)
 
-- 언어: Python 3.11
-- 실행 환경: 
-- 외부 의존 리포지토리: 
-- 필수 가중치/체크포인트:
+## 파이프라인
 
-## 실행 방법
+### SEGMENTATION
 
-### 전체 파이프라인 실행
+#### 이미지 배경 제거
 
-전체 pipeline을 처음부터 끝까지 실행합니다.
+![배경 제거 이미지](./doc/260505/raw_image_birefnet.png)
 
-```bash
-python run_pipeline.py
+`BiRefNet` 모델을 이용하여 배경을 제거한다.
+
+#### 객체 태그 추출
+
+```
+--------------
+pretrained/ram_plus_swin_large_14m.pth
+--------------
+load checkpoint from pretrained/ram_plus_swin_large_14m.pth
+vit: swin_l
+Image Tags:  alcohol | appliance | beverage | black | blender | bottle | coffee machine | liquor | wine | home appliance | kitchenware | lid | liquid | mixer | olive | olive oil | wine bottle
+图像标签:  酒精  | 设备  | 饮料  | 黑色 | 搅拌机  | 瓶  | 咖啡机 | 酒 | 葡萄酒 | 家用电器 | 厨房用具 | 盖子  | 液体  | 搅拌机 | 橄榄  | 橄榄油  | 酒瓶 
 ```
 
-특정 device를 지정하려면:
+배경 제거된 이미지에서 `recognize-anything` 모델을 통해 태그를 추출한다.
 
-```bash
-python run_pipeline.py --device cuda
-python run_pipeline.py --device cpu
-```
+#### 객체별 마스크 추출
 
-이미 생성된 결과를 재사용하면서 없는 stage만 실행하려면:
+![객체 마스크 이미지](./doc/260505/grounded_sam2_annotated_image_with_mask.jpg)
 
-```bash
-python run_pipeline.py --skip-existing
-```
+`Grounded-SAM-2` 모델에 추출한 태그를 입력하여 객체별 마스크를 얻는다.
 
-기존 결과를 덮어쓰며 다시 생성하려면:
+---
 
-```bash
-python run_pipeline.py --overwrite
-```
+### GENERATION
 
-### 개별 stage 실행
+#### 객체별 3D mesh 생성
 
+![어셋 생성 결과 이미지](./doc/260505/image%20(4).png)
 
-```bash
-python -m image_to_world.stages.extract_tags
-python -m image_to_world.stages.generate_masks
-python -m image_to_world.stages.complete_objects
-python -m image_to_world.stages.generate_meshes
-python -m image_to_world.stages.estimate_depth
-python -m image_to_world.stages.compose_layout
-python -m image_to_world.stages.assemble_scene
-```
+객체 마스크별로 이미지를 크롭하여 `Hunyuan3D-2`에 입력으로 넣어 객체별 3D mesh 를 생성한다.
 
-각 stage도 동일하게 다음 옵션을 지원합니다.
+#### remesh
 
-```bash
---device cuda|cpu
---skip-existing
---overwrite
-```
+![리메시 결과 이미지](./doc/260505/image%20(5).png)  
+
+생성된 mesh의 폴리곤을 줄인다.
+
+---
+
+### PLACEMENT
+
+#### depth 추정
+
+![Depth map 이미지](./doc/260505/raw_image%20copy.jpg)
+
+`ml-depth-pro` 모델을 이용해 이미지의 depth map을 얻는다.
+
+#### 카메라 파라미터 및 자세 추정 기반 pointcloud
+
+![초기 배치 시각화 이미지](./doc/260505/pointcloud_4views.png)
+
+#### 초기 배치
+
+![초기 배치 시각화 이미지](./doc/260505/raw_transform_4views.png)
+마스크와 depth 정보를 결합해 객체의 초기 위치/크기/회전을 추정한다.
+
+#### differential rendering
+
+![Differential rendering 과정 이미지](./doc/260505/render_step_0000_loss_2.313139.png)
+
+렌더링 결과와 원본 이미지의 차이를 최소화하도록 객체 transform을 반복 최적화한다.
+
 ## 결과물
 
 [`2026-04-24` : 3D 메쉬 생성 모델 변경](./doc/260424/260424.md)
@@ -83,7 +94,18 @@ python -m image_to_world.stages.assemble_scene
 
 ## 기술 스택
 
+## 개발 환경
 
+- 언어: Python 3.11
+- 실행 환경: 
+- 외부 의존 리포지토리: 
+- 필수 가중치/체크포인트:
+
+## 실행 방법
+
+```bash
+python run.py
+```
 
 ## 참고 자료
 
@@ -96,3 +118,5 @@ python -m image_to_world.stages.assemble_scene
 - [Gen3DSR: Generalizable 3D Scene Reconstruction via Divide and Conquer from a Single View](https://arxiv.org/html/2404.03421v2)
 - [Open-World Amodal Appearance Completion](https://arxiv.org/html/2411.13019v1)
 - [TEASER: Fast and Certifiable Point Cloud Registration](https://arxiv.org/abs/2001.07715)
+
+## 리소스 출처

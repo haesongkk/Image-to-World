@@ -14,17 +14,17 @@ def run_placement():
     project_root = Path(__file__).resolve().parent.parent.parent
     image_path = project_root / "data" / "raw_image.jpg"
 
-    # run_mldepthpro(image_path)
-    # print("ML Depth Pro finished successfully.")
+    run_mldepthpro(image_path)
+    print("ML Depth Pro finished successfully.")
 
-    # run_perspectivefields(image_path)
-    # print("PerspectiveFields finished successfully.")
+    run_perspectivefields(image_path)
+    print("PerspectiveFields finished successfully.")
 
-    # make_pointcloud(image_path)
-    # print("Point cloud generation finished successfully.")
+    make_pointcloud(image_path)
+    print("Point cloud generation finished successfully.")
 
-    # make_raw_transform(image_path)
-    # print("Raw transform preparation finished successfully.")
+    make_raw_transform(image_path)
+    print("Raw transform preparation finished successfully.")
 
     # make_fitted_transform(image_path)
     # print("Fitted transform preparation finished successfully.")
