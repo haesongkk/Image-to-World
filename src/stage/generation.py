@@ -2,6 +2,9 @@
 from pathlib import Path
 
 from src.external.hunyuan3d2 import run_hunyuan3d2
+from src.tool.bake import make_bake_maps
+from src.tool.remesh import make_remesh_glb
+
 
 def run_generation():
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -22,3 +25,9 @@ def run_generation():
     for crop_image_path in crop_images:
         run_hunyuan3d2(crop_image_path)
         print(f"Hunyuan3D-2 finished: {crop_image_path.name}")
+
+        make_remesh_glb(crop_image_path.stem)
+        print(f"Remeshing finished: {crop_image_path.name}")
+
+        # make_bake_maps(crop_image_path.stem)
+        # print(f"Baking finished: {crop_image_path.name}")
