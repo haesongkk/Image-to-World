@@ -9,7 +9,7 @@ def make_remesh_glb(output_name: str):
     remesh_output_dir = project_root / "output" / "remesh"
     remesh_output_dir.mkdir(parents=True, exist_ok=True)
 
-    src_mesh_path = mesh_input_dir / f"{output_name}_final_textured_mesh.glb"
+    src_mesh_path = mesh_input_dir / f"{output_name}_shape_mesh.glb"
     dst_mesh_path = remesh_output_dir / f"{output_name}_remeshed.glb"
 
     src_obj_path = remesh_output_dir / f"{output_name}_source.obj"

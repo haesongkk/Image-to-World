@@ -1,16 +1,17 @@
 import os
-import subprocess
 from pathlib import Path
 
-def run_recognizeanything(image_path: Path):
-    project_root = Path(__file__).resolve().parent.parent.parent
+from src.config import OUTPUT_DIR, THIRD_PARTY_DIR
+from src.external.runner import run_external_command
 
-    repo_root = project_root / "third_party" / "recognize-anything"
+
+def run_recognizeanything(image_path: Path):
+    repo_root = THIRD_PARTY_DIR / "recognize-anything"
     venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
     inference_script = repo_root / "inference_ram_plus.py"
 
-    input_image_path = project_root / "output" / "BirefNet" / f"{image_path.stem}_birefnet.png"
-    output_dir  = project_root / "output" / "recognize-anything" 
+    input_image_path = OUTPUT_DIR / "BirefNet" / f"{image_path.stem}_birefnet.png"
+    output_dir = OUTPUT_DIR / "recognize-anything"
     os.makedirs(output_dir, exist_ok=True)
 
     output_path = output_dir / "stdout.txt"
@@ -18,24 +19,21 @@ def run_recognizeanything(image_path: Path):
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
+    env["HF_HUB_OFFLINE"] = "1"
+    env["TRANSFORMERS_OFFLINE"] = "1"
 
-    result = subprocess.run(
-        [
+    result = run_external_command(
+        name="recognizeanything",
+        command=[
             str(venv_python),
             str(inference_script),
-            "--image", str(input_image_path),
+            "--image",
+            str(input_image_path),
         ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=str(repo_root),
+        cwd=repo_root,
+        log_dir=output_dir,
         env=env,
     )
-
-    if(result.returncode != 0):
-        raise RuntimeError("RAM inference failed..\n" + result.stderr)
-        
-    
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(result.stdout)
 

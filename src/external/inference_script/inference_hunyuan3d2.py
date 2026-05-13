@@ -10,7 +10,6 @@ from PIL import Image
 import argparse
 
 # from hy3dgen.rembg import BackgroundRemover
-from hy3dgen.texgen import Hunyuan3DPaintPipeline
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
 parser = argparse.ArgumentParser(description="Inference script for Hunyuan3D-2")
@@ -24,7 +23,6 @@ output_name = image_path.stem
 output_dir.mkdir(parents=True, exist_ok=True)
 
 shape_mesh_path = output_dir / f"{output_name}_shape_mesh.glb"
-paint_mesh_path = output_dir / f"{output_name}_final_textured_mesh.glb"
 
 image = Image.open(image_path).convert("RGBA")
 # rembg = BackgroundRemover()
@@ -35,7 +33,6 @@ shape_pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
     subfolder='hunyuan3d-dit-v2-mini',
     variant='fp16'
 )
-paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")
 
 mesh = shape_pipeline(
     image=image,
@@ -46,6 +43,3 @@ mesh = shape_pipeline(
     output_type='trimesh'
 )[0]
 mesh.export(shape_mesh_path)
-
-mesh = paint_pipeline(mesh, image=image)
-mesh.export(paint_mesh_path)

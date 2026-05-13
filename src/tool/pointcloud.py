@@ -9,8 +9,8 @@ def make_pointcloud(image_path: Path):
     project_root = Path(__file__).resolve().parent.parent.parent
 
     object_masks_dir = project_root / "output" / "mask"
-    depth_map_path = project_root / "output" / "ml-depth-pro" / "raw_image.npz"
-    camera_intrinsics_path = project_root / "output" / "PerspectiveFields" / "raw_image_perspective_fields.json"
+    depth_map_path = project_root / "output" / "ml-depth-pro" / f"{image_path.stem}.npz"
+    camera_intrinsics_path = project_root / "output" / "PerspectiveFields" / f"{image_path.stem}_perspective_fields.json"
 
     output_dir  = project_root / "output" / "pointcloud" 
     os.makedirs(output_dir, exist_ok=True)

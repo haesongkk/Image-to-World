@@ -119,7 +119,9 @@ def make_scene_glb(image_path: Path) -> None:
         raise RuntimeError(f"Transform file not found: {transform_path}")
 
     glb_paths = (
-        sorted(remesh_dir.glob("*_remeshed.glb"))
+        sorted(remesh_dir.glob("*_remeshed_textured.glb"))
+        or sorted(remesh_dir.glob("*_textured.glb"))
+        or sorted(remesh_dir.glob("*_remeshed.glb"))
         or sorted(mesh_dir.glob("*_remeshed.glb"))
         or sorted(mesh_dir.glob("*_remesh.glb"))
         or sorted(mesh_dir.glob("*_shape_mesh.glb"))

@@ -1,0 +1,18 @@
+[submodule "third_party/recognize-anything"]
+	path = third_party/recognize-anything
+	url = https://github.com/xinyu1205/recognize-anything.git
+[submodule "third_party/Grounded-SAM-2"]
+	path = third_party/Grounded-SAM-2
+	url = https://github.com/IDEA-Research/Grounded-SAM-2.git
+[submodule "third_party/Hunyuan3D-2"]
+	path = third_party/Hunyuan3D-2
+	url = https://github.com/Tencent-Hunyuan/Hunyuan3D-2.git
+[submodule "third_party/ml-depth-pro"]
+	path = third_party/ml-depth-pro
+	url = https://github.com/apple/ml-depth-pro.git
+[submodule "third_party/PerspectiveFields"]
+	path = third_party/PerspectiveFields
+	url = https://github.com/jinlinyi/PerspectiveFields.git
+[submodule "third_party/pytorch3d"]
+	path = third_party/pytorch3d
+	url = https://github.com/facebookresearch/pytorch3d.git
