@@ -5,5 +5,8 @@ references/
 third_party/.cache/
 
 output/
+output0/
 output1/
 data/
+
+.claude/

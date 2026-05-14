@@ -1,31 +1,27 @@
 # AGENTS.md
 
-## Goal
-- Shared working rules for contributors/agents in this repository.
-
-## Submodule Policy (Important)
-- `third_party/*` is managed by Git submodules.
-- Do not `git clone` third-party repos manually into `third_party`.
-- Always sync/init with:
-  - `git submodule sync --recursive`
-  - `git submodule update --init --recursive`
-- To refresh all third-party repos cleanly:
-  - `git submodule deinit -f --all`
-  - `git submodule update --init --recursive --force`
-
 ## Project Structure
-- Entry: `run.py`
-- Pipeline: `src/pipeline.py`
-- Stages:
-  - `src/stage/segmentation.py`
-  - `src/stage/generation.py`
-  - `src/stage/placement.py`
-- Shared config: `src/config.py`
-- External process runner: `src/external/runner.py`
-- Preflight checks: `src/preflight.py`
-- Manifest writer: `src/manifest.py`
-- DAG helpers: `src/pipeline_dag.py`
-- Tests: `tests/`
+- Entry point: `run.py`
+- Core source: `src/`
+  - Pipeline orchestration: `src/pipeline.py`
+  - Stage modules: `src/stage/`
+    - `src/stage/segmentation.py`
+    - `src/stage/generation.py`
+    - `src/stage/placement.py`
+  - External integrations: `src/external/`
+    - Command runner: `src/external/runner.py`
+    - Tool wrappers: model/tool-specific modules (e.g. GroundedSAM2, BiRefNet, Hunyuan3D, DepthPro)
+  - Geometry/utility tools: `src/tool/`
+  - Shared config: `src/config.py`
+  - Preflight checks: `src/preflight.py`
+  - Pipeline DAG/helpers: `src/pipeline_dag.py`
+  - Shared types: `src/pipeline_types.py`
+  - Manifest writer: `src/manifest.py`
+- Third-party submodules: `third_party/`
+- Runtime/artifact directories:
+  - Input/reference assets: `data/`, `references/`
+  - Outputs: `output/`, `output0/`, `output1/`
+  - Docs and debug snapshots: `doc/`
 
 ## Runtime Commands
 - Full run: `python run.py`
@@ -40,21 +36,40 @@
 - For external tools, use `run_external_command` instead of direct `subprocess.run`.
 - Use path constants from `src/config.py` (avoid repeated hardcoded path construction).
 - Keep pipeline orchestration in `src/pipeline.py` and dependency/output checks in `src/pipeline_dag.py`.
+- Avoid modifying repositories under `third_party/*` unless absolutely necessary.
+
+## Change Scope
+- Before implementation, identify the target stage(s) and the expected impact scope in related files.
+- Keep changes minimal and focused; avoid unrelated refactors in the same change.
 
 ## Logging and Artifacts
 - External process stdout/stderr logs are saved under each module output directory.
 - Run metadata is saved to `output/run_manifest.json`.
 - New stages should report key outputs via `StageResult.outputs`.
+- During implementation or modification, leave useful debug logs and intermediate visualization images so failures can be diagnosed quickly.
+
+## Failure Handling
+- If a run fails, record the executed command, key input conditions, and the failing stage.
+- Keep references to relevant stdout/stderr log files for quick triage.
+- Capture reproducible context (parameters, input assets, and environment differences when relevant).
+
+## Output Contract
+- Treat stage outputs as contracts for downstream stages; do not rename or remove artifacts casually.
+- When output schema/paths must change, update all dependent code in the same change.
+- Validate that required outputs exist and are readable before marking a stage as successful.
+
+## Config and Secrets
+- Keep shared runtime paths and constants centralized in `src/config.py`.
+- Do not hardcode secrets or credentials in source files.
+- Use environment variables for machine-specific or sensitive settings.
 
 ## Test Rules
 - Minimum check after edits:
-  - `python -m unittest discover -s tests -p "test_*.py"`
-- For new behavior, add at least one of:
-  - unit test (logic)
-  - lightweight integration test (mocked external runner)
-  - regression test (artifact schema/output existence)
+  - Run the related stage and the stages immediately before and after it (pre-modified-post sequence).
+  - Verify the pipeline runs without crashes.
+  - Verify outputs are produced correctly and have no obvious issues.
 
-## Cautions
-- Do not change third-party CLI arguments lightly.
-- Do not rename output artifacts without updating dependent code.
-- Keep heavyweight model runs out of default test paths.
+## PR Validation Checklist
+- Confirm target/adjacent stage execution checks were completed (pre-modified-post sequence).
+- Confirm expected artifacts were produced and visually/structurally validated.
+- Confirm useful debug logs or intermediate visualizations are available for troubleshooting.
