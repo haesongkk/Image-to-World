@@ -73,3 +73,21 @@
 - Confirm target/adjacent stage execution checks were completed (pre-modified-post sequence).
 - Confirm expected artifacts were produced and visually/structurally validated.
 - Confirm useful debug logs or intermediate visualizations are available for troubleshooting.
+
+## Execution Gate (Hard Requirement)
+- After any code change, the agent MUST run validation before responding.
+- Minimum required validation is the pre-modified-post sequence for the affected stage.
+  - Example: if `generation` changed, run `segmentation -> generation -> placement`.
+- The agent MUST NOT send a completion/final response until all required validations finish.
+
+## Reporting Contract (Hard Requirement)
+- Every completion response MUST include:
+  1. Executed commands (exact)
+  2. Pass/fail status per command
+  3. Produced artifact paths
+  4. Relevant stdout/stderr log file paths
+- If any validation is skipped or fails, the response MUST start with:
+  `VALIDATION INCOMPLETE` or `VALIDATION FAILED`
+  and include the reason.
+- Any response that lacks this Reporting Contract is considered non-compliant.
+- Non-compliant responses must be corrected in the next turn before new work.

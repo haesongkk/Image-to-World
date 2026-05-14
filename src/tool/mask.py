@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import os
 import numpy as np
 import json
@@ -6,13 +6,14 @@ import re
 import cv2
 import pycocotools.mask as mask_util
 
-def make_mask(image_path: Path):
-    project_root = Path(__file__).resolve().parent.parent.parent
+from src.config import OUTPUT_DIR
 
-    grounded_sam_2_results_path = project_root / "output" / "Grounded-SAM-2" / "grounded_sam2_hf_model_demo_results.json"
-    output_dir = project_root / "output" / "mask"
+
+def make_mask(image_path: Path):
+    grounded_sam_2_results_path = OUTPUT_DIR / "Grounded-SAM-2" / "grounded_sam2_hf_model_demo_results.json"
+    output_dir = OUTPUT_DIR / "mask"
     os.makedirs(output_dir, exist_ok=True)
-    input_image_path = project_root / "output" / "BirefNet" / f"{image_path.stem}_birefnet.png"
+    input_image_path = image_path
     image = cv2.imread(str(input_image_path), cv2.IMREAD_COLOR)
 
     with open(grounded_sam_2_results_path, "r", encoding="utf-8") as f:
@@ -24,7 +25,7 @@ def make_mask(image_path: Path):
 
     for idx, ann in enumerate(annotations):
         class_name = str(ann.get("class_name"))
-        class_name = re.sub(r"[^0-9A-Za-z_-]+", "_", class_name).strip("_") 
+        class_name = re.sub(r"[^0-9A-Za-z_-]+", "_", class_name).strip("_")
         seg = ann.get("segmentation")
         mask = mask_util.decode({"size": seg["size"], "counts": seg["counts"]})
 
@@ -42,4 +43,3 @@ def make_mask(image_path: Path):
 
     output_viz_path = output_dir / "mask_viz.png"
     cv2.imwrite(str(output_viz_path), color_canvas)
-

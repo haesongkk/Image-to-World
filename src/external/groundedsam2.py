@@ -26,7 +26,7 @@ def run_groundedsam2(image_path: Path):
     venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
     inference_script = repo_root / "grounded_sam2_hf_model_demo.py"
 
-    input_image_path = OUTPUT_DIR / "BirefNet" / f"{image_path.stem}_birefnet.png"
+    input_image_path = image_path
     text_prompt_path = OUTPUT_DIR / "recognize-anything" / "text_prompt.txt"
     if not text_prompt_path.exists():
         raise RuntimeError(f"Text prompt file not found: {text_prompt_path}")
