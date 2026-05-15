@@ -10,6 +10,7 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 import trimesh
+from src.config import CAMERA_ESTIMATION_OUTPUT_DIR, MASK_POSTPROCESS_OUTPUT_DIR, MESH_GENERATION_OUTPUT_DIR, SCENE_PRECOMPUTE_OUTPUT_DIR
 
 from pytorch3d.renderer import (
     BlendParams,
@@ -187,10 +188,10 @@ def _safe_float(v: object, default: float) -> float:
 def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
     project_root = Path(project_root)
     image_path = Path(image_path)
-    mesh_dir = project_root / "output" / "Hunyuan3D-2"
-    mask_dir = project_root / "output" / "mask"
-    raw_transform_path = project_root / "output" / "raw_transform" / "raw_transform.json"
-    perspective_path = project_root / "output" / "PerspectiveFields" / f"{image_path.stem}_perspective_fields.json"
+    mesh_dir = MESH_GENERATION_OUTPUT_DIR
+    mask_dir = MASK_POSTPROCESS_OUTPUT_DIR
+    raw_transform_path = SCENE_PRECOMPUTE_OUTPUT_DIR / "raw_transform.json"
+    perspective_path = CAMERA_ESTIMATION_OUTPUT_DIR / f"{image_path.stem}_perspective_fields.json"
     fitted_init_path = project_root / "output" / "fitted_transform" / "fitted_transform.json"
     output_dir = project_root / "output" / "fitted_transform_debug" / image_path.stem / run_name
     output_dir.mkdir(parents=True, exist_ok=True)

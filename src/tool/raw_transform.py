@@ -3,13 +3,13 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from src.config import SCENE_PRECOMPUTE_OUTPUT_DIR
 
 def make_raw_transform(image_path: Path):
-    project_root = Path(__file__).resolve().parent.parent.parent
-    output_dir  = project_root / "output" / "raw_transform"
+    output_dir = SCENE_PRECOMPUTE_OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pointcloud_dir = project_root / "output" / "pointcloud"
+    pointcloud_dir = SCENE_PRECOMPUTE_OUTPUT_DIR
     transform = []
     for pointcloud_path in sorted(pointcloud_dir.glob("*.npy")):
         pointcloud = np.load(pointcloud_path)

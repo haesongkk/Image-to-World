@@ -4,15 +4,18 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from src.config import (
+    CAMERA_ESTIMATION_OUTPUT_DIR,
+    DEPTH_ESTIMATION_OUTPUT_DIR,
+    MASK_POSTPROCESS_OUTPUT_DIR,
+    SCENE_PRECOMPUTE_OUTPUT_DIR,
+)
 
 def make_pointcloud(image_path: Path):
-    project_root = Path(__file__).resolve().parent.parent.parent
-
-    object_masks_dir = project_root / "output" / "mask"
-    depth_map_path = project_root / "output" / "ml-depth-pro" / f"{image_path.stem}.npz"
-    camera_intrinsics_path = project_root / "output" / "PerspectiveFields" / f"{image_path.stem}_perspective_fields.json"
-
-    output_dir  = project_root / "output" / "pointcloud" 
+    object_masks_dir = MASK_POSTPROCESS_OUTPUT_DIR
+    depth_map_path = DEPTH_ESTIMATION_OUTPUT_DIR / f"{image_path.stem}.npz"
+    camera_intrinsics_path = CAMERA_ESTIMATION_OUTPUT_DIR / f"{image_path.stem}_perspective_fields.json"
+    output_dir  = SCENE_PRECOMPUTE_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
     
     depth_npz = np.load(depth_map_path)

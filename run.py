@@ -3,10 +3,23 @@ from src.pipeline import run_pipeline
 
 
 def parse_args():
+    stage_choices = [
+        "all",
+        "prompting",
+        "instance_segmentation",
+        "mask_postprocess",
+        "mesh_generation",
+        "mesh_remesh",
+        "mesh_texturing",
+        "depth_estimation",
+        "camera_estimation",
+        "scene_precompute",
+        "scene_assembly",
+    ]
     parser = argparse.ArgumentParser(description="Run Image-to-World pipeline")
     parser.add_argument(
         "--stage",
-        choices=["all", "segmentation", "generation", "placement"],
+        choices=stage_choices,
         default="all",
         help="Select a single stage or run the full pipeline.",
     )

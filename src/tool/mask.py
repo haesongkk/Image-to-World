@@ -6,12 +6,12 @@ import re
 import cv2
 import pycocotools.mask as mask_util
 
-from src.config import OUTPUT_DIR
+from src.config import INSTANCE_SEGMENTATION_OUTPUT_DIR, MASK_POSTPROCESS_OUTPUT_DIR
 
 
 def make_mask(image_path: Path):
-    grounded_sam_2_results_path = OUTPUT_DIR / "Grounded-SAM-2" / "grounded_sam2_hf_model_demo_results.json"
-    output_dir = OUTPUT_DIR / "mask"
+    grounded_sam_2_results_path = INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"
+    output_dir = MASK_POSTPROCESS_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
     input_image_path = image_path
     image = cv2.imread(str(input_image_path), cv2.IMREAD_COLOR)

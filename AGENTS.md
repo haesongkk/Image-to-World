@@ -5,9 +5,16 @@
 - Core source: `src/`
   - Pipeline orchestration: `src/pipeline.py`
   - Stage modules: `src/stage/`
-    - `src/stage/segmentation.py`
-    - `src/stage/generation.py`
-    - `src/stage/placement.py`
+    - `src/stage/prompting.py`
+    - `src/stage/instance_segmentation.py`
+    - `src/stage/mask_postprocess.py`
+    - `src/stage/mesh_generation.py`
+    - `src/stage/mesh_remesh.py`
+    - `src/stage/mesh_texturing.py`
+    - `src/stage/depth_estimation.py`
+    - `src/stage/camera_estimation.py`
+    - `src/stage/scene_precompute.py`
+    - `src/stage/scene_assembly.py`
   - External integrations: `src/external/`
     - Command runner: `src/external/runner.py`
     - Tool wrappers: model/tool-specific modules (e.g. GroundedSAM2, BiRefNet, Hunyuan3D, DepthPro)
@@ -26,9 +33,16 @@
 ## Runtime Commands
 - Full run: `python run.py`
 - Single stage:
-  - `python run.py --stage segmentation`
-  - `python run.py --stage generation`
-  - `python run.py --stage placement`
+  - `python run.py --stage prompting`
+  - `python run.py --stage instance_segmentation`
+  - `python run.py --stage mask_postprocess`
+  - `python run.py --stage mesh_generation`
+  - `python run.py --stage mesh_remesh`
+  - `python run.py --stage mesh_texturing`
+  - `python run.py --stage depth_estimation`
+  - `python run.py --stage camera_estimation`
+  - `python run.py --stage scene_precompute`
+  - `python run.py --stage scene_assembly`
 - Resume mode: `python run.py --resume`
 
 ## Coding Rules
@@ -77,7 +91,7 @@
 ## Execution Gate (Hard Requirement)
 - After any code change, the agent MUST run validation before responding.
 - Minimum required validation is the pre-modified-post sequence for the affected stage.
-  - Example: if `generation` changed, run `segmentation -> generation -> placement`.
+  - Example: if `mesh_remesh` changed, run `mesh_generation -> mesh_remesh -> mesh_texturing`.
 - The agent MUST NOT send a completion/final response until all required validations finish.
 
 ## Reporting Contract (Hard Requirement)

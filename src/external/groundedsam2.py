@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 import pycocotools.mask as mask_util
-from src.config import OUTPUT_DIR, THIRD_PARTY_DIR
+from src.config import INSTANCE_SEGMENTATION_OUTPUT_DIR, PROMPTING_OUTPUT_DIR, THIRD_PARTY_DIR
 from src.external.runner import run_external_command
 
 
@@ -27,13 +27,13 @@ def run_groundedsam2(image_path: Path):
     inference_script = repo_root / "grounded_sam2_hf_model_demo.py"
 
     input_image_path = image_path
-    text_prompt_path = OUTPUT_DIR / "recognize-anything" / "text_prompt.txt"
+    text_prompt_path = PROMPTING_OUTPUT_DIR / "text_prompt.txt"
     if not text_prompt_path.exists():
         raise RuntimeError(f"Text prompt file not found: {text_prompt_path}")
     with open(text_prompt_path, "r", encoding="utf-8") as f:
         text_prompt = f.read().strip()
 
-    output_dir = OUTPUT_DIR / "Grounded-SAM-2"
+    output_dir = INSTANCE_SEGMENTATION_OUTPUT_DIR
     os.makedirs(output_dir , exist_ok=True)
     local_grounding_model = _resolve_grounding_dino_local_path()
     env = os.environ.copy()

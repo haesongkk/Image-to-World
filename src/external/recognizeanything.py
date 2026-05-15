@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from src.config import OUTPUT_DIR, THIRD_PARTY_DIR
+from src.config import PROMPTING_OUTPUT_DIR, THIRD_PARTY_DIR
 from src.external.runner import run_external_command
 
 
@@ -11,7 +11,7 @@ def run_recognizeanything(image_path: Path):
     inference_script = repo_root / "inference_ram_plus.py"
 
     input_image_path = image_path
-    output_dir = OUTPUT_DIR / "recognize-anything"
+    output_dir = PROMPTING_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
     output_path = output_dir / "stdout.txt"

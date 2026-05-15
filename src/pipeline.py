@@ -4,37 +4,85 @@ from datetime import datetime, timezone
 from pathlib import Path
 import time
 
-from src.config import OUTPUT_DIR, PROJECT_ROOT, raw_image_path
+from src.config import (
+    CAMERA_ESTIMATION_OUTPUT_DIR,
+    DEPTH_ESTIMATION_OUTPUT_DIR,
+    INSTANCE_SEGMENTATION_OUTPUT_DIR,
+    MASK_POSTPROCESS_OUTPUT_DIR,
+    MESH_GENERATION_OUTPUT_DIR,
+    MESH_REMESH_OUTPUT_DIR,
+    MESH_TEXTURING_OUTPUT_DIR,
+    OUTPUT_DIR,
+    PROJECT_ROOT,
+    PROMPTING_OUTPUT_DIR,
+    SCENE_ASSEMBLY_OUTPUT_DIR,
+    SCENE_PRECOMPUTE_OUTPUT_DIR,
+    raw_image_path,
+)
 from src.manifest import write_run_manifest
 from src.pipeline_dag import stage_deps_ready, stage_output_ready
 from src.pipeline_types import StageResult
 from src.preflight import run_preflight
-from src.stage.generation import run_generation
-from src.stage.placement import run_placement
-from src.stage.segmentation import run_segmentation
+from src.stage.camera_estimation import run_camera_estimation
+from src.stage.depth_estimation import run_depth_estimation
+from src.stage.instance_segmentation import run_instance_segmentation
+from src.stage.mask_postprocess import run_mask_postprocess
+from src.stage.mesh_generation import run_mesh_generation
+from src.stage.mesh_remesh import run_mesh_remesh
+from src.stage.mesh_texturing import run_mesh_texturing
+from src.stage.prompting import run_prompting
+from src.stage.scene_assembly import run_scene_assembly
+from src.stage.scene_precompute import run_scene_precompute
 
-STAGES = ("segmentation", "generation", "placement")
+STAGES = (
+    "prompting",
+    "instance_segmentation",
+    "mask_postprocess",
+    "mesh_generation",
+    "mesh_remesh",
+    "mesh_texturing",
+    "depth_estimation",
+    "camera_estimation",
+    "scene_precompute",
+    "scene_assembly",
+)
 
 def _stage_dependencies(input_image: Path) -> dict[str, list[Path]]:
     return {
-        "segmentation": [input_image],
-        "generation": [OUTPUT_DIR / "Grounded-SAM-2" / "crops"],
-        "placement": [
+        "prompting": [input_image],
+        "instance_segmentation": [input_image, PROMPTING_OUTPUT_DIR / "text_prompt.txt"],
+        "mask_postprocess": [input_image, INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
+        "mesh_generation": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "crops"],
+        "mesh_remesh": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "crops"],
+        "mesh_texturing": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "crops", MESH_REMESH_OUTPUT_DIR],
+        "depth_estimation": [input_image],
+        "camera_estimation": [input_image],
+        "scene_precompute": [
             input_image,
-            OUTPUT_DIR / "mask" / "mask_viz.png",
-            OUTPUT_DIR / "Grounded-SAM-2" / "crops",
+            MASK_POSTPROCESS_OUTPUT_DIR / "mask_viz.png",
+            DEPTH_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}.npz",
+            CAMERA_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}_perspective_fields.json",
+        ],
+        "scene_assembly": [
+            input_image,
+            MESH_REMESH_OUTPUT_DIR,
+            SCENE_PRECOMPUTE_OUTPUT_DIR / "raw_transform.json",
         ],
     }
 
 
 def _stage_output_candidates(input_image: Path) -> dict[str, list[Path]]:
     return {
-        "segmentation": [OUTPUT_DIR / "mask" / "mask_viz.png"],
-        "generation": [
-            OUTPUT_DIR / "remesh",
-            OUTPUT_DIR / "Hunyuan3D-2",
-        ],
-        "placement": [OUTPUT_DIR / "scene" / f"{input_image.stem}_assembled.glb"],
+        "prompting": [PROMPTING_OUTPUT_DIR / "text_prompt.txt"],
+        "instance_segmentation": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
+        "mask_postprocess": [MASK_POSTPROCESS_OUTPUT_DIR / "mask_viz.png"],
+        "mesh_generation": [MESH_GENERATION_OUTPUT_DIR],
+        "mesh_remesh": [MESH_REMESH_OUTPUT_DIR],
+        "mesh_texturing": [MESH_TEXTURING_OUTPUT_DIR],
+        "depth_estimation": [DEPTH_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}.npz"],
+        "camera_estimation": [CAMERA_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}_perspective_fields.json"],
+        "scene_precompute": [SCENE_PRECOMPUTE_OUTPUT_DIR / "raw_transform.json"],
+        "scene_assembly": [SCENE_ASSEMBLY_OUTPUT_DIR / f"{input_image.stem}_assembled.glb"],
     }
 
 
@@ -44,12 +92,26 @@ def _utc_now_iso() -> str:
 
 def _run_stage(stage: str, input_image: Path) -> StageResult:
     start = time.perf_counter()
-    if stage == "segmentation":
-        result = run_segmentation(input_image)
-    elif stage == "generation":
-        result = run_generation()
-    elif stage == "placement":
-        result = run_placement(input_image)
+    if stage == "prompting":
+        result = run_prompting(input_image)
+    elif stage == "instance_segmentation":
+        result = run_instance_segmentation(input_image)
+    elif stage == "mask_postprocess":
+        result = run_mask_postprocess(input_image)
+    elif stage == "mesh_generation":
+        result = run_mesh_generation()
+    elif stage == "mesh_remesh":
+        result = run_mesh_remesh()
+    elif stage == "mesh_texturing":
+        result = run_mesh_texturing()
+    elif stage == "depth_estimation":
+        result = run_depth_estimation(input_image)
+    elif stage == "camera_estimation":
+        result = run_camera_estimation(input_image)
+    elif stage == "scene_precompute":
+        result = run_scene_precompute(input_image)
+    elif stage == "scene_assembly":
+        result = run_scene_assembly(input_image)
     else:
         raise ValueError(f"Unknown stage: {stage}")
     result.duration_sec = time.perf_counter() - start

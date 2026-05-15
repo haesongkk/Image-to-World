@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pymeshlab
 import trimesh
+from src.config import MESH_GENERATION_OUTPUT_DIR, MESH_REMESH_OUTPUT_DIR
 
 def make_remesh_glb(output_name: str):
-    project_root = Path(__file__).resolve().parent.parent.parent
-    mesh_input_dir = project_root / "output" / "Hunyuan3D-2"
-    remesh_output_dir = project_root / "output" / "remesh"
+    mesh_input_dir = MESH_GENERATION_OUTPUT_DIR
+    remesh_output_dir = MESH_REMESH_OUTPUT_DIR
     remesh_output_dir.mkdir(parents=True, exist_ok=True)
 
     src_mesh_path = mesh_input_dir / f"{output_name}_shape_mesh.glb"

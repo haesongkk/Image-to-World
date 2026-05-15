@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from src.config import OUTPUT_DIR, THIRD_PARTY_DIR
+from src.config import CAMERA_ESTIMATION_OUTPUT_DIR, THIRD_PARTY_DIR
 from src.external.runner import run_external_command
 
 
@@ -10,7 +10,7 @@ def run_perspectivefields(image_path: Path):
     venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
     inference_script =  Path(__file__).resolve().parent / "inference_script" / "inference_perspectivefields.py"
 
-    output_dir = OUTPUT_DIR / "PerspectiveFields"
+    output_dir = CAMERA_ESTIMATION_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
     run_external_command(

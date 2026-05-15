@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from src.config import OUTPUT_DIR, THIRD_PARTY_DIR
+from src.config import MESH_TEXTURING_OUTPUT_DIR, THIRD_PARTY_DIR
 from src.external.runner import run_external_command
 
 
@@ -42,7 +42,7 @@ def run_hunyuan3d_paint(image_path: Path, mesh_path: Path, output_path: Path):
     inference_script = Path(__file__).resolve().parent / "inference_script" / "inference_hunyuan3d_paint.py"
     paint_model, paint_subfolder = _pick_paint_model()
 
-    output_dir = OUTPUT_DIR / "Hunyuan3D-2"
+    output_dir = MESH_TEXTURING_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
     env = os.environ.copy()
     env["HF_HUB_OFFLINE"] = "1"
