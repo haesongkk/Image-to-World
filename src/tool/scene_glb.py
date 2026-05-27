@@ -3,16 +3,58 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import math
+import re
 
 import numpy as np
 import trimesh
 from src.config import (
+    MASK_POSTPROCESS_OUTPUT_DIR,
     MESH_GENERATION_OUTPUT_DIR,
     MESH_REMESH_OUTPUT_DIR,
     MESH_TEXTURING_OUTPUT_DIR,
+    PROJECT_ROOT,
     SCENE_ASSEMBLY_OUTPUT_DIR,
     SCENE_PRECOMPUTE_OUTPUT_DIR,
 )
+
+
+_OBJECT_NAME_RE = re.compile(r"^(?:object_)?(\d+)_(.+?)(?:_(?:mask|points|shape_mesh|remeshed|remeshed_textured|textured|remesh|final_textured_mesh))?$")
+
+
+def _load_stuff_keywords() -> list[str]:
+    cfg = PROJECT_ROOT / "config" / "stuff_classes.json"
+    if not cfg.exists():
+        return []
+    try:
+        with open(cfg, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        keywords = data.get("stuff_keywords", [])
+        return [str(k).lower() for k in keywords]
+    except Exception as e:
+        print(f"scene_glb: failed to read stuff_classes.json ({e}); proceeding without filter")
+        return []
+
+
+def _class_from_filename(stem: str) -> str:
+    m = _OBJECT_NAME_RE.match(stem)
+    if not m:
+        return stem.lower()
+    return m.group(2).lower()
+
+
+def _compute_keep_mask(mask_dir: Path, stuff_keywords: list[str]) -> tuple[list[int], list[str]]:
+    """Return (kept_indices, kept_class_names) by scanning per-object mask filenames in order."""
+    mask_files = sorted(mask_dir.glob("object_*_mask.npy"))
+    kept_indices: list[int] = []
+    kept_classes: list[str] = []
+    for i, mp in enumerate(mask_files):
+        cname = _class_from_filename(mp.stem)
+        if any(kw in cname for kw in stuff_keywords):
+            print(f"scene_glb: filter stuff idx={i} class='{cname}'")
+            continue
+        kept_indices.append(i)
+        kept_classes.append(cname)
+    return kept_indices, kept_classes
 
 _S_TO_P = np.array(
     [
@@ -149,8 +191,25 @@ def make_scene_glb(image_path: Path) -> None:
     if object_count == 0:
         raise RuntimeError("No objects to assemble into scene GLB.")
 
+    # Filter stuff classes (e.g. floor, walls, background "living_room") so they
+    # don't appear as separate movable meshes. Their Hunyuan3D output is
+    # typically degenerate and their visible-AABB scale is wildly oversized.
+    stuff_keywords = _load_stuff_keywords()
+    if stuff_keywords:
+        kept, kept_classes = _compute_keep_mask(MASK_POSTPROCESS_OUTPUT_DIR, stuff_keywords)
+        kept = [i for i in kept if i < object_count]
+        if not kept:
+            print("scene_glb: stuff filter removed all objects; falling back to unfiltered")
+            kept = list(range(object_count))
+            kept_classes = [None] * object_count
+    else:
+        kept = list(range(object_count))
+        kept_classes = [None] * object_count
+
+    print(f"scene_glb: assembling {len(kept)} / {object_count} objects (stuff filter)")
+
     scene = trimesh.Scene()
-    for obj_idx in range(object_count):
+    for slot, obj_idx in enumerate(kept):
         tr = transforms[obj_idx]
         tx, ty, tz = map(float, tr[0:3])
         sx, sy, sz = np.maximum(tr[3:6], 1e-6).astype(np.float32)
@@ -163,7 +222,9 @@ def make_scene_glb(image_path: Path) -> None:
             [tx, ty, tz], dtype=np.float32
         )
         mesh.vertices = verts_world
-        scene.add_geometry(mesh, node_name=f"object_{obj_idx:03d}", geom_name=f"object_{obj_idx:03d}")
+        cname = kept_classes[slot] if slot < len(kept_classes) and kept_classes[slot] else f"object_{obj_idx:03d}"
+        node_name = f"object_{obj_idx:03d}_{cname}" if cname and not cname.startswith("object_") else f"object_{obj_idx:03d}"
+        scene.add_geometry(mesh, node_name=node_name, geom_name=node_name)
 
     out_path = output_dir / f"{image_path.stem}_assembled.glb"
     scene.export(out_path)

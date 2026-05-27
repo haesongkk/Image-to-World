@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 import trimesh
 from src.config import CAMERA_ESTIMATION_OUTPUT_DIR, MASK_POSTPROCESS_OUTPUT_DIR, MESH_GENERATION_OUTPUT_DIR, SCENE_PRECOMPUTE_OUTPUT_DIR
+from src.tool.stuff_filter import compute_keep_indices
 
 from pytorch3d.renderer import (
     BlendParams,
@@ -24,12 +25,10 @@ from pytorch3d.renderer import (
 from pytorch3d.structures import Meshes, join_meshes_as_scene
 
 DEFAULTS = {
-    # main_steps=0 → 4-way heading search only, no silhouette refinement.
-    # Current raw_transform has visible-AABB scale issues that make silhouette
-    # optimization diverge or actively hurt. Enable >0 once P0-1 (amodal) lands
-    # and raw scales become realistic.
-    "steps": 0,
-    "save_every": 20,
+    # Stuff classes (floor/walls/room) filtered upstream; remaining objects
+    # have tighter scale ranges so main loop can run again.
+    "steps": 20,
+    "save_every": 5,
     "image_size": 160,
     "fov": 60.0,
     "camera_dist": 3.7,
@@ -205,11 +204,24 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
     device_mode = str(DEFAULTS["device"]).lower()
     device = torch.device("cuda" if device_mode != "cpu" and torch.cuda.is_available() else "cpu")
 
-    glb_paths = _resolve_glb_paths(mesh_dir)
-    mask_paths = sorted(mask_dir.glob("object_*_mask.npy"))
-    raw = _load_transform_json(raw_transform_path)
+    glb_paths_all = _resolve_glb_paths(mesh_dir)
+    mask_paths_all = sorted(mask_dir.glob("object_*_mask.npy"))
+    raw_full = _load_transform_json(raw_transform_path)
 
-    n = min(len(glb_paths), len(mask_paths), raw.shape[0])
+    # Apply stuff filter so background/floor objects are excluded from optimization.
+    # raw_full is preserved (full length) so we can write back the same length output;
+    # stuff slots pass through raw unchanged.
+    total_count = min(len(glb_paths_all), len(mask_paths_all), raw_full.shape[0])
+    keep_indices = compute_keep_indices(mask_dir)
+    keep_indices = [i for i in keep_indices if i < total_count]
+    if not keep_indices:
+        keep_indices = list(range(total_count))
+    glb_paths = [glb_paths_all[i] for i in keep_indices]
+    mask_paths = [mask_paths_all[i] for i in keep_indices]
+    raw = raw_full[keep_indices]
+    print(f"fitted_transform: optimizing {len(keep_indices)} / {total_count} objects after stuff filter")
+
+    n = len(keep_indices)
     if n == 0:
         raise ValueError("No objects to optimize.")
 
@@ -390,9 +402,9 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
 
         meshes, losses = [], []
         for i in range(n):
-            s = raw_s[i] * torch.exp(torch.clamp(dls[i], -2.0, 2.0))
+            s = raw_s[i] * torch.exp(torch.clamp(dls[i], -0.7, 0.7))  # ~0.5x..2x
             r = raw_r[i] + torch.clamp(dr[i], -90.0, 90.0)
-            t = raw_t[i] + torch.clamp(dt[i], -5.0, 5.0)
+            t = raw_t[i] + torch.clamp(dt[i], -3.0, 3.0)
             rot = _euler_xyz_deg(r[0], r[1], r[2]).to(device=device, dtype=torch.float32)
             vw = (verts[i] * s.unsqueeze(0)) @ rot.T + t.unsqueeze(0)
             mesh_i = Meshes(verts=[vw], faces=[faces[i]])
@@ -475,24 +487,50 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
     np.save(output_dir / "render_ref.npy", alpha_np)
     _save_gray(output_dir / "target_ref.png", target_np)
     fitted_json_path = output_dir / "fitted_transform.json"
-    fitted_payload_rows = []
-    for tr in np.asarray(fitted_rows, dtype=np.float32):
-        t_p = np.array([float(tr[0]), float(tr[1]), float(tr[2])], dtype=np.float32)
-        s_p = np.array([float(tr[3]), float(tr[4]), float(tr[5])], dtype=np.float32)
-        r_p = _euler_xyz_deg_to_rot_np(float(tr[6]), float(tr[7]), float(tr[8]))
 
-        t_s = _S_TO_P.T @ t_p
-        s_s = np.array([s_p[2], s_p[0], s_p[1]], dtype=np.float32)  # inverse of (y,z,x)
-        r_s = _S_TO_P.T @ r_p @ _S_TO_P
-        rx_s, ry_s, rz_s = _rot_to_euler_xyz_deg_np(r_s)
-
-        fitted_payload_rows.append(
-            {
-                "translation": {"x": float(t_s[0]), "y": float(t_s[1]), "z": float(t_s[2])},
-                "scale": {"x": float(s_s[0]), "y": float(s_s[1]), "z": float(s_s[2])},
-                "rotation_deg": {"x": float(rx_s), "y": float(ry_s), "z": float(rz_s)},
-            }
-        )
+    # Build full-length payload: kept indices use fitted rows (pytorch3d frame),
+    # filtered (stuff) indices fall back to raw_full (storage frame, already
+    # heading-untouched). This preserves the (count = total_count) alignment that
+    # scene_glb expects when applying its own stuff filter.
+    keep_set = set(keep_indices)
+    local_iter = iter(np.asarray(fitted_rows, dtype=np.float32))
+    fitted_payload_rows: list[dict] = []
+    for full_idx in range(total_count):
+        if full_idx in keep_set:
+            tr = next(local_iter)
+            t_p = np.array([float(tr[0]), float(tr[1]), float(tr[2])], dtype=np.float32)
+            s_p = np.array([float(tr[3]), float(tr[4]), float(tr[5])], dtype=np.float32)
+            r_p = _euler_xyz_deg_to_rot_np(float(tr[6]), float(tr[7]), float(tr[8]))
+            t_s = _S_TO_P.T @ t_p
+            s_s = np.array([s_p[2], s_p[0], s_p[1]], dtype=np.float32)  # inverse of (y,z,x)
+            r_s = _S_TO_P.T @ r_p @ _S_TO_P
+            rx_s, ry_s, rz_s = _rot_to_euler_xyz_deg_np(r_s)
+            fitted_payload_rows.append(
+                {
+                    "translation": {"x": float(t_s[0]), "y": float(t_s[1]), "z": float(t_s[2])},
+                    "scale": {"x": float(s_s[0]), "y": float(s_s[1]), "z": float(s_s[2])},
+                    "rotation_deg": {"x": float(rx_s), "y": float(ry_s), "z": float(rz_s)},
+                }
+            )
+        else:
+            # raw_full is in storage frame already (loaded then re-encoded via _S_TO_P
+            # inside _load_transform_json then converted back). Re-derive storage frame
+            # from raw_full pytorch3d row.
+            tr = np.asarray(raw_full[full_idx, :9], dtype=np.float32)
+            t_p = np.array([float(tr[0]), float(tr[1]), float(tr[2])], dtype=np.float32)
+            s_p = np.array([float(tr[3]), float(tr[4]), float(tr[5])], dtype=np.float32)
+            r_p = _euler_xyz_deg_to_rot_np(float(tr[6]), float(tr[7]), float(tr[8]))
+            t_s = _S_TO_P.T @ t_p
+            s_s = np.array([s_p[2], s_p[0], s_p[1]], dtype=np.float32)
+            r_s = _S_TO_P.T @ r_p @ _S_TO_P
+            rx_s, ry_s, rz_s = _rot_to_euler_xyz_deg_np(r_s)
+            fitted_payload_rows.append(
+                {
+                    "translation": {"x": float(t_s[0]), "y": float(t_s[1]), "z": float(t_s[2])},
+                    "scale": {"x": float(s_s[0]), "y": float(s_s[1]), "z": float(s_s[2])},
+                    "rotation_deg": {"x": float(rx_s), "y": float(ry_s), "z": float(rz_s)},
+                }
+            )
 
     fitted_payload = {"transforms": fitted_payload_rows}
     with open(fitted_json_path, "w", encoding="utf-8") as f:

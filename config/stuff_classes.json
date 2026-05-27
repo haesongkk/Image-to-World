@@ -1,0 +1,23 @@
+{
+  "_comment": "Class name substrings (case-insensitive) treated as 'stuff' (static background) and excluded from movable object set. Matched against the per-object mask filename suffix (e.g. 'object_000_living_room_mask.npy' -> 'living_room').",
+  "stuff_keywords": [
+    "living_room",
+    "bedroom",
+    "kitchen",
+    "bathroom",
+    "hallway",
+    "room",
+    "floor",
+    "wall",
+    "ceiling",
+    "carpet",
+    "rug",
+    "sky",
+    "ground",
+    "grass",
+    "road",
+    "sidewalk",
+    "window",
+    "door"
+  ]
+}
