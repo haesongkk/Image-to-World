@@ -8,6 +8,7 @@ from src.config import (
     CAMERA_ESTIMATION_OUTPUT_DIR,
     CROPS_GENERATION_OUTPUT_DIR,
     DEPTH_ESTIMATION_OUTPUT_DIR,
+    FITTED_TRANSFORM_OUTPUT_DIR,
     INSTANCE_SEGMENTATION_OUTPUT_DIR,
     MASK_POSTPROCESS_OUTPUT_DIR,
     MESH_GENERATION_OUTPUT_DIR,
@@ -27,6 +28,7 @@ from src.preflight import run_preflight
 from src.stage.camera_estimation import run_camera_estimation
 from src.stage.crops_generation import run_crops_generation
 from src.stage.depth_estimation import run_depth_estimation
+from src.stage.fitted_transform import run_fitted_transform
 from src.stage.instance_segmentation import run_instance_segmentation
 from src.stage.mask_postprocess import run_mask_postprocess
 from src.stage.mesh_generation import run_mesh_generation
@@ -47,6 +49,7 @@ STAGES = (
     "depth_estimation",
     "camera_estimation",
     "scene_precompute",
+    "fitted_transform",
     "scene_assembly",
 )
 
@@ -65,6 +68,13 @@ def _stage_dependencies(input_image: Path) -> dict[str, list[Path]]:
             input_image,
             MASK_POSTPROCESS_OUTPUT_DIR / "mask_viz.png",
             DEPTH_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}.npz",
+            CAMERA_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}_perspective_fields.json",
+        ],
+        "fitted_transform": [
+            input_image,
+            MESH_GENERATION_OUTPUT_DIR,
+            MASK_POSTPROCESS_OUTPUT_DIR / "mask_viz.png",
+            SCENE_PRECOMPUTE_OUTPUT_DIR / "raw_transform.json",
             CAMERA_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}_perspective_fields.json",
         ],
         "scene_assembly": [
@@ -87,6 +97,7 @@ def _stage_output_candidates(input_image: Path) -> dict[str, list[Path]]:
         "depth_estimation": [DEPTH_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}.npz"],
         "camera_estimation": [CAMERA_ESTIMATION_OUTPUT_DIR / f"{input_image.stem}_perspective_fields.json"],
         "scene_precompute": [SCENE_PRECOMPUTE_OUTPUT_DIR / "raw_transform.json"],
+        "fitted_transform": [FITTED_TRANSFORM_OUTPUT_DIR / "fitted_transform.json"],
         "scene_assembly": [SCENE_ASSEMBLY_OUTPUT_DIR / f"{input_image.stem}_assembled.glb"],
     }
 
@@ -117,6 +128,8 @@ def _run_stage(stage: str, input_image: Path) -> StageResult:
         result = run_camera_estimation(input_image)
     elif stage == "scene_precompute":
         result = run_scene_precompute(input_image)
+    elif stage == "fitted_transform":
+        result = run_fitted_transform(input_image)
     elif stage == "scene_assembly":
         result = run_scene_assembly(input_image)
     else:

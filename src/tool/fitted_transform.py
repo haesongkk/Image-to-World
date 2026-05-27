@@ -42,6 +42,7 @@ def make_fitted_transform(image_path: Path):
         "-lc",
         (
             f"cd '{wsl_project_root}' && "
+            f"export PYTHONPATH='{wsl_project_root}' && "
             f"'{wsl_python_path}' '{wsl_script_path}' "
             f"'{wsl_project_root}' "
             f"'{wsl_image_path}' "

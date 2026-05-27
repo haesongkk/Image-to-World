@@ -15,6 +15,7 @@ def parse_args():
         "depth_estimation",
         "camera_estimation",
         "scene_precompute",
+        "fitted_transform",
         "scene_assembly",
     ]
     parser = argparse.ArgumentParser(description="Run Image-to-World pipeline")

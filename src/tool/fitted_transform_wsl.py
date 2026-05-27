@@ -24,25 +24,29 @@ from pytorch3d.renderer import (
 from pytorch3d.structures import Meshes, join_meshes_as_scene
 
 DEFAULTS = {
-    "steps": 400,
-    "save_every": 50,
-    "image_size": 256,
+    # main_steps=0 → 4-way heading search only, no silhouette refinement.
+    # Current raw_transform has visible-AABB scale issues that make silhouette
+    # optimization diverge or actively hurt. Enable >0 once P0-1 (amodal) lands
+    # and raw scales become realistic.
+    "steps": 0,
+    "save_every": 20,
+    "image_size": 160,
     "fov": 60.0,
     "camera_dist": 3.7,
     "camera_elev": 0.9,
     "camera_azim": 1.4,
-    "lr_t": 4e-3,
-    "lr_s": 3e-3,
-    "lr_r": 8e-3,
+    "lr_t": 1.5e-3,
+    "lr_s": 1.0e-3,
+    "lr_r": 3e-3,
     "device": "cuda",  # "cuda" or "cpu"
     "use_fitted_init": True,
-    "faces_pp": 24,
-    "final_faces_pp": 64,
+    "faces_pp": 16,
+    "final_faces_pp": 32,
     "sil_ema_beta": 0.9,
-    "early_stop_warmup_steps": 120,
+    "early_stop_warmup_steps": 40,
     "early_stop_total_loss": 0.08,
-    "early_stop_patience": 30,
-    "camera_prefit_steps": 80,
+    "early_stop_patience": 15,
+    "camera_prefit_steps": 30,
     "camera_prefit_lr": 0.04,
     "camera_prefit_w_dist": 0.01,
     "camera_prefit_w_angle": 0.002,
@@ -328,6 +332,47 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
 
     vis_renderer = make_vis_renderer(cam)
 
+    # 4-way heading seed (P0-2): pick the best gravity-axis rotation per object.
+    # In pytorch3d frame (after S_TO_P) the up axis is +y, so heading lives in raw_r[:, 1].
+    # fitted_transform's main loop can only correct ±90°, so this resolves 180° flips first.
+    heading_offsets_deg = [0.0, 90.0, 180.0, 270.0]
+    heading_log: list[dict] = []
+    with torch.no_grad():
+        heading_renderer = make_renderer(cam, 2e-3, 2e-3, int(DEFAULTS["faces_pp"]))
+        best_offsets = torch.zeros(n, dtype=torch.float32, device=device)
+        for i in range(n):
+            ious = []
+            for off in heading_offsets_deg:
+                r_test = raw_r[i].clone()
+                r_test[1] = r_test[1] + float(off)
+                rot = _euler_xyz_deg(r_test[0], r_test[1], r_test[2]).to(device=device, dtype=torch.float32)
+                vw = (verts[i] * raw_s[i].unsqueeze(0)) @ rot.T + raw_t[i].unsqueeze(0)
+                mesh_i = Meshes(verts=[vw], faces=[faces[i]])
+                alpha = torch.clamp(heading_renderer(mesh_i)[0, ..., 3], 0.0, 1.0)
+                iou_val = _iou(
+                    alpha.detach().cpu().numpy() >= 0.5,
+                    targets[i].detach().cpu().numpy() >= 0.5,
+                )
+                ious.append(iou_val)
+            best_idx = int(np.argmax(ious))
+            best_offsets[i] = float(heading_offsets_deg[best_idx])
+            heading_log.append({
+                "index": i,
+                "ious": [float(x) for x in ious],
+                "best_offset_deg": float(heading_offsets_deg[best_idx]),
+                "best_iou": float(ious[best_idx]),
+            })
+            print(
+                f"[heading] obj {i:02d}: "
+                f"ious={[f'{x:.3f}' for x in ious]} "
+                f"-> {heading_offsets_deg[best_idx]:6.1f}° (iou={ious[best_idx]:.3f})"
+            )
+        raw_r = raw_r.clone()
+        raw_r[:, 1] = raw_r[:, 1] + best_offsets
+
+    with open(output_dir / "heading_search.json", "w", encoding="utf-8") as f:
+        json.dump({"offsets_tried_deg": heading_offsets_deg, "per_object": heading_log}, f, indent=2)
+
     total_steps = int(DEFAULTS["steps"])
     total_loss_ema: float | None = None
     early_stop_warmup = max(int(DEFAULTS["early_stop_warmup_steps"]), 0)
@@ -347,13 +392,19 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
         for i in range(n):
             s = raw_s[i] * torch.exp(torch.clamp(dls[i], -2.0, 2.0))
             r = raw_r[i] + torch.clamp(dr[i], -90.0, 90.0)
-            t = raw_t[i] + dt[i]
+            t = raw_t[i] + torch.clamp(dt[i], -5.0, 5.0)
             rot = _euler_xyz_deg(r[0], r[1], r[2]).to(device=device, dtype=torch.float32)
             vw = (verts[i] * s.unsqueeze(0)) @ rot.T + t.unsqueeze(0)
             mesh_i = Meshes(verts=[vw], faces=[faces[i]])
             meshes.append(mesh_i)
             alpha = torch.clamp(renderer(mesh_i)[0, ..., 3], 0.0, 1.0)
-            losses.append(F.binary_cross_entropy(alpha, targets[i]) + _dice_loss(alpha, targets[i]))
+            obj_loss = F.binary_cross_entropy(alpha, targets[i]) + _dice_loss(alpha, targets[i])
+            if torch.isfinite(obj_loss):
+                losses.append(obj_loss)
+
+        if not losses:
+            print(f"[skip] step={step} all per-object losses non-finite")
+            continue
 
         sil_loss = torch.stack(losses).mean()
 
@@ -362,6 +413,10 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
         reg = 0.05 * (dt ** 2).mean() + 0.01 * (dls ** 2).mean() + 0.0005 * (dr ** 2).mean()
         loss = sil_loss + reg
 
+        if not torch.isfinite(loss):
+            print(f"[skip] step={step} total loss non-finite ({float(loss.detach().item())})")
+            opt.zero_grad(set_to_none=True)
+            continue
 
         total_loss_value = float(loss.detach().item())
         if total_loss_ema is None:
@@ -389,6 +444,9 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
 
 
         loss.backward()
+        # Gradient clipping to suppress occasional spikes when an object's mesh
+        # leaves the frustum.
+        torch.nn.utils.clip_grad_norm_([dt, dls, dr], max_norm=2.0)
         opt.step()
 
     renderer_final = make_renderer(cam, 2e-4, 2e-4, int(DEFAULTS["final_faces_pp"]))

@@ -111,13 +111,16 @@ def make_scene_glb(image_path: Path) -> None:
     remesh_dir = MESH_REMESH_OUTPUT_DIR
     textured_dir = MESH_TEXTURING_OUTPUT_DIR
     mesh_dir = MESH_GENERATION_OUTPUT_DIR
+    # Priority: fitted_transform (refined) > fitted_transform_debug > raw_transform (initial).
+    project_root = Path(__file__).resolve().parent.parent.parent
     transform_candidates = [
+        project_root / "output" / "fitted_transform" / "fitted_transform.json",
+        project_root / "output" / "fitted_transform_debug" / image_path.stem / "fitted_transform.json",
+        project_root / "output" / "fitted_transform_debug" / image_path.stem / "simple" / "fitted_transform.json",
         SCENE_PRECOMPUTE_OUTPUT_DIR / "raw_transform.json",
-        Path(__file__).resolve().parent.parent.parent / "output" / "fitted_transform" / "fitted_transform.json",
-        Path(__file__).resolve().parent.parent.parent / "output" / "fitted_transform_debug" / image_path.stem / "fitted_transform.json",
-        Path(__file__).resolve().parent.parent.parent / "output" / "fitted_transform_debug" / image_path.stem / "simple" / "fitted_transform.json",
     ]
-    transform_path = next((p for p in transform_candidates if p.exists()), transform_candidates[0])
+    transform_path = next((p for p in transform_candidates if p.exists()), transform_candidates[-1])
+    print(f"scene_glb: using transforms from {transform_path}")
     output_dir = SCENE_ASSEMBLY_OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
