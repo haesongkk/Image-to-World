@@ -6,6 +6,7 @@ import time
 
 from src.config import (
     CAMERA_ESTIMATION_OUTPUT_DIR,
+    CROPS_GENERATION_OUTPUT_DIR,
     DEPTH_ESTIMATION_OUTPUT_DIR,
     INSTANCE_SEGMENTATION_OUTPUT_DIR,
     MASK_POSTPROCESS_OUTPUT_DIR,
@@ -24,6 +25,7 @@ from src.pipeline_dag import stage_deps_ready, stage_output_ready
 from src.pipeline_types import StageResult
 from src.preflight import run_preflight
 from src.stage.camera_estimation import run_camera_estimation
+from src.stage.crops_generation import run_crops_generation
 from src.stage.depth_estimation import run_depth_estimation
 from src.stage.instance_segmentation import run_instance_segmentation
 from src.stage.mask_postprocess import run_mask_postprocess
@@ -37,6 +39,7 @@ from src.stage.scene_precompute import run_scene_precompute
 STAGES = (
     "prompting",
     "instance_segmentation",
+    "crops_generation",
     "mask_postprocess",
     "mesh_generation",
     "mesh_remesh",
@@ -51,10 +54,11 @@ def _stage_dependencies(input_image: Path) -> dict[str, list[Path]]:
     return {
         "prompting": [input_image],
         "instance_segmentation": [input_image, PROMPTING_OUTPUT_DIR / "text_prompt.txt"],
+        "crops_generation": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
         "mask_postprocess": [input_image, INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
-        "mesh_generation": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "crops"],
-        "mesh_remesh": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "crops"],
-        "mesh_texturing": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "crops", MESH_REMESH_OUTPUT_DIR],
+        "mesh_generation": [CROPS_GENERATION_OUTPUT_DIR / "crops"],
+        "mesh_remesh": [CROPS_GENERATION_OUTPUT_DIR / "crops"],
+        "mesh_texturing": [CROPS_GENERATION_OUTPUT_DIR / "crops", MESH_REMESH_OUTPUT_DIR],
         "depth_estimation": [input_image],
         "camera_estimation": [input_image],
         "scene_precompute": [
@@ -75,6 +79,7 @@ def _stage_output_candidates(input_image: Path) -> dict[str, list[Path]]:
     return {
         "prompting": [PROMPTING_OUTPUT_DIR / "text_prompt.txt"],
         "instance_segmentation": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
+        "crops_generation": [CROPS_GENERATION_OUTPUT_DIR / "crops"],
         "mask_postprocess": [MASK_POSTPROCESS_OUTPUT_DIR / "mask_viz.png"],
         "mesh_generation": [MESH_GENERATION_OUTPUT_DIR],
         "mesh_remesh": [MESH_REMESH_OUTPUT_DIR],
@@ -96,6 +101,8 @@ def _run_stage(stage: str, input_image: Path) -> StageResult:
         result = run_prompting(input_image)
     elif stage == "instance_segmentation":
         result = run_instance_segmentation(input_image)
+    elif stage == "crops_generation":
+        result = run_crops_generation()
     elif stage == "mask_postprocess":
         result = run_mask_postprocess(input_image)
     elif stage == "mesh_generation":

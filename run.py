@@ -7,6 +7,7 @@ def parse_args():
         "all",
         "prompting",
         "instance_segmentation",
+        "crops_generation",
         "mask_postprocess",
         "mesh_generation",
         "mesh_remesh",

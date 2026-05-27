@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 import pycocotools.mask as mask_util
-from src.config import INSTANCE_SEGMENTATION_OUTPUT_DIR, PROMPTING_OUTPUT_DIR, THIRD_PARTY_DIR
+from src.config import CROPS_GENERATION_OUTPUT_DIR, INSTANCE_SEGMENTATION_OUTPUT_DIR, PROMPTING_OUTPUT_DIR, THIRD_PARTY_DIR
 from src.external.runner import run_external_command
 
 
@@ -21,7 +21,7 @@ def _resolve_grounding_dino_local_path() -> Path:
     return snapshots[-1]
 
 
-def run_groundedsam2(image_path: Path):
+def run_groundedsam2_inference(image_path: Path):
     repo_root = THIRD_PARTY_DIR / "Grounded-SAM-2"
     venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
     inference_script = repo_root / "grounded_sam2_hf_model_demo.py"
@@ -67,16 +67,34 @@ def run_groundedsam2(image_path: Path):
         infer_results = json.load(f)
 
     source_image_path = Path(infer_results.get("image_path", str(image_path)))
+    if not source_image_path.is_absolute():
+        source_image_path = (repo_root / source_image_path).resolve()
+    if not source_image_path.exists():
+        raise RuntimeError(f"Source image file not found: {source_image_path}")
+
+    return source_image_path, infer_results
+
+
+def run_groundedsam2_crop_generation():
+    results_json_path = INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"
+    if not results_json_path.exists():
+        raise RuntimeError(f"Results json file not found: {results_json_path}")
+
+    with open(results_json_path, "r", encoding="utf-8") as f:
+        infer_results = json.load(f)
+
+    source_image_path = Path(infer_results.get("image_path", ""))
+    if not source_image_path.is_absolute():
+        source_image_path = source_image_path.resolve()
     if not source_image_path.exists():
         raise RuntimeError(f"Source image file not found: {source_image_path}")
 
     source_image = Image.open(source_image_path).convert("RGB")
     source_arr = np.array(source_image)
 
+    output_dir = CROPS_GENERATION_OUTPUT_DIR
     crops_dir = output_dir / "crops"
-    masks_dir = output_dir / "masks"
     os.makedirs(crops_dir, exist_ok=True)
-    os.makedirs(masks_dir, exist_ok=True)
 
     annotations = infer_results.get("annotations", [])
     for idx, ann in enumerate(annotations):
@@ -114,7 +132,3 @@ def run_groundedsam2(image_path: Path):
         out_name = f"{idx:03d}_{safe_class_name}_{score_str}.png"
         out_path = crops_dir / out_name
         Image.fromarray(crop, mode="RGB").save(out_path)
-
-        mask_out_name = f"{idx:03d}_{safe_class_name}_{score_str}_mask.png"
-        mask_out_path = masks_dir / mask_out_name
-        Image.fromarray((mask * 255).astype(np.uint8), mode="L").save(mask_out_path)

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from src.config import INSTANCE_SEGMENTATION_OUTPUT_DIR, MESH_REMESH_OUTPUT_DIR
+from src.config import CROPS_GENERATION_OUTPUT_DIR, MESH_REMESH_OUTPUT_DIR
 from src.pipeline_types import StageResult
 from src.tool.remesh import make_remesh_glb
 
 
 def _list_crop_images():
-    crop_image_dir = INSTANCE_SEGMENTATION_OUTPUT_DIR / "crops"
+    crop_image_dir = CROPS_GENERATION_OUTPUT_DIR / "crops"
     if not crop_image_dir.exists():
         raise RuntimeError(f"Crop image directory not found: {crop_image_dir}")
 

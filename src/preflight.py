@@ -13,7 +13,7 @@ def require_exists(path: Path, label: str) -> None:
 def run_preflight(stage: str, input_image: Path) -> None:
     require_exists(input_image, "input image")
 
-    segmentation_stages = ("prompting", "instance_segmentation", "mask_postprocess")
+    segmentation_stages = ("prompting", "instance_segmentation", "crops_generation", "mask_postprocess")
     generation_stages = ("mesh_generation", "mesh_remesh", "mesh_texturing")
     placement_stages = ("depth_estimation", "camera_estimation", "scene_precompute", "scene_assembly")
 
