@@ -27,8 +27,8 @@ from pytorch3d.structures import Meshes, join_meshes_as_scene
 DEFAULTS = {
     # Stuff classes (floor/walls/room) filtered upstream; remaining objects
     # have tighter scale ranges so main loop can run again.
-    "steps": 20,
-    "save_every": 5,
+    "steps": 60,
+    "save_every": 10,
     "image_size": 160,
     "fov": 60.0,
     "camera_dist": 3.7,
@@ -314,7 +314,7 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
     cam_opt = torch.optim.Adam([log_dist, elev_p, azim_p, fov_p], lr=float(DEFAULTS["camera_prefit_lr"]))
     for _ in range(max(int(DEFAULTS["camera_prefit_steps"]), 0)):
         cam_opt.zero_grad(set_to_none=True)
-        dist_cur = torch.exp(log_dist).clamp(1.5, 8.0)
+        dist_cur = torch.exp(log_dist).clamp(1.5, 15.0)
         elev_cur = elev_p.clamp(-45.0, 45.0)
         azim_cur = azim_p.clamp(-180.0, 180.0)
         fov_cur = fov_p.clamp(30.0, 90.0)
@@ -336,7 +336,7 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
         cam_opt.step()
 
     with torch.no_grad():
-        dist_cur = torch.exp(log_dist).clamp(1.5, 8.0)
+        dist_cur = torch.exp(log_dist).clamp(1.5, 15.0)
         elev_cur = elev_p.clamp(-45.0, 45.0)
         azim_cur = azim_p.clamp(-180.0, 180.0)
         fov_cur = fov_p.clamp(30.0, 90.0)
