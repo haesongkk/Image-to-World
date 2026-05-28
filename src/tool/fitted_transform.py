@@ -61,6 +61,8 @@ def make_fitted_transform(image_path: Path):
     stderr = (result.stderr or "").strip()
     if result.returncode != 0:
         raise RuntimeError(f"WSL differentiable rendering failed (code={result.returncode}): {stderr[-2000:]}")
+    if stdout:
+        print(stdout)
 
     run_dir = output_root / run_name
     trial_meta_path = run_dir / "render_meta.json"

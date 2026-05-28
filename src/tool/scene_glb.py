@@ -226,15 +226,19 @@ def make_scene_glb(image_path: Path) -> None:
         node_name = f"object_{obj_idx:03d}_{cname}" if cname and not cname.startswith("object_") else f"object_{obj_idx:03d}"
         scene.add_geometry(mesh, node_name=node_name, geom_name=node_name)
 
-    # Add fitted floor plane (M3 lite) so the scene has ground reference.
+    # Add fitted floor + wall planes so the scene has a textured background.
     try:
-        from src.tool.floor_plane import build_floor_mesh
+        from src.tool.floor_plane import build_floor_mesh, build_wall_mesh
         floor_mesh = build_floor_mesh()
         if floor_mesh is not None:
             scene.add_geometry(floor_mesh, node_name="background_floor", geom_name="background_floor")
             print("scene_glb: added background_floor plane mesh")
+        wall_mesh = build_wall_mesh()
+        if wall_mesh is not None:
+            scene.add_geometry(wall_mesh, node_name="background_wall", geom_name="background_wall")
+            print("scene_glb: added background_wall plane mesh")
     except Exception as e:
-        print(f"scene_glb: floor plane skipped ({e})")
+        print(f"scene_glb: background planes skipped ({e})")
 
     out_path = output_dir / f"{image_path.stem}_assembled.glb"
     scene.export(out_path)

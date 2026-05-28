@@ -27,6 +27,19 @@ def load_stuff_keywords() -> list[str]:
         return []
 
 
+def load_floor_resting_keywords() -> list[str]:
+    cfg = PROJECT_ROOT / "config" / "floor_resting_classes.json"
+    if not cfg.exists():
+        return []
+    try:
+        with open(cfg, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return [str(k).lower() for k in data.get("floor_resting_keywords", [])]
+    except Exception as e:
+        print(f"floor_resting: failed to read floor_resting_classes.json ({e})")
+        return []
+
+
 def class_from_filename(stem: str) -> str:
     m = _OBJECT_NAME_RE.match(stem)
     if not m:

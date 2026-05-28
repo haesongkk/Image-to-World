@@ -37,6 +37,10 @@ def _default_camera_json() -> Path:
     return PROJECT_ROOT / "output" / "camera_estimation" / "raw_image_perspective_fields.json"
 
 
+def _default_fitted_camera_json(image_stem: str = "raw_image") -> Path:
+    return PROJECT_ROOT / "output" / "fitted_transform_debug" / image_stem / "simple" / "render_meta.json"
+
+
 def _default_image() -> Path:
     return PROJECT_ROOT / "data" / "raw_image.jpg"
 
@@ -45,12 +49,34 @@ def _default_out_dir() -> Path:
     return PROJECT_ROOT / "output" / "demo"
 
 
-def input_camera_pose(roll_deg: float = 0.0, pitch_deg: float = 0.0) -> np.ndarray:
+def input_camera_pose(
+    roll_deg: float = 0.0,
+    pitch_deg: float = 0.0,
+    dist: float = 0.0,
+    elev_deg: float = 0.0,
+    azim_deg: float = 0.0,
+) -> np.ndarray:
     """Cam-to-world pose matching the pipeline's input camera.
 
-    Scene GLB uses OpenGL/PyTorch3D convention: +x right, +y up, -z forward (camera at origin).
-    PerspectiveFields roll/pitch tilt the camera around its local axes.
+    Two regimes:
+      - `dist == 0`: camera sits at world origin looking -z, optionally tilted
+        by PerspectiveFields roll/pitch. Used when fitted_transform stored its
+        transforms with the camera at origin.
+      - `dist > 0`: pytorch3d-style `look_at_view_transform(dist, elev, azim)`
+        camera around the world origin. Used when fitted_transform optimized a
+        free camera (render_meta.json `camera.dist`).
     """
+    if dist > 1e-6:
+        elev_r = math.radians(elev_deg)
+        azim_r = math.radians(azim_deg)
+        eye = np.array([
+            dist * math.cos(elev_r) * math.sin(azim_r),
+            dist * math.sin(elev_r),
+            dist * math.cos(elev_r) * math.cos(azim_r),
+        ], dtype=np.float64)
+        # GLB / pytorch3d world up is +y, NOT +z (look_at default).
+        return look_at(eye, np.zeros(3), up_world=np.array([0.0, 1.0, 0.0]))
+
     pose = np.eye(4, dtype=np.float64)
     if abs(roll_deg) < 1e-6 and abs(pitch_deg) < 1e-6:
         return pose
@@ -100,14 +126,43 @@ def load_objects(glb_path: Path) -> list[tuple[str, trimesh.Trimesh]]:
     return items
 
 
+def composite_over_background(
+    render_rgb: np.ndarray,
+    bg_path: Path | None,
+    bg_color: tuple[int, int, int] = (255, 255, 255),
+) -> np.ndarray:
+    """Replace the white background of a pyrender output with a real image.
+
+    pyrender renders movable objects against `bg_color` (white). Any pixel
+    that is exactly bg_color is treated as "no object" and replaced with the
+    corresponding pixel from the resized background image.
+    """
+    if bg_path is None or not bg_path.exists():
+        return render_rgb
+    bg = Image.open(bg_path).convert("RGB")
+    h, w = render_rgb.shape[:2]
+    bg_resized = np.array(bg.resize((w, h), Image.BILINEAR))
+    is_bg = np.all(render_rgb >= 250, axis=2)
+    out = render_rgb.copy()
+    out[is_bg] = bg_resized[is_bg]
+    return out
+
+
 def build_pyrender_scene(
     items: list[tuple[str, trimesh.Trimesh]],
     exclude: set[str] | None = None,
     bg: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ambient: float = 0.70,
+    skip_background_planes: bool = False,
 ) -> pyrender.Scene:
-    pscene = pyrender.Scene(bg_color=bg, ambient_light=[0.45, 0.45, 0.45])
+    # Higher ambient so Hunyuan-Paint textures stay readable on dark objects
+    # (the air fryer is nearly black, so weak ambient + side-lighting alone
+    # makes it render as a featureless silhouette).
+    pscene = pyrender.Scene(bg_color=bg, ambient_light=[ambient, ambient, ambient])
     for name, geom in items:
         if exclude is not None and name in exclude:
+            continue
+        if skip_background_planes and ("background_" in name):
             continue
         try:
             mesh = pyrender.Mesh.from_trimesh(geom, smooth=False)
@@ -118,10 +173,14 @@ def build_pyrender_scene(
 
 
 def add_lights(pscene: pyrender.Scene, centroid: np.ndarray, extent: float) -> None:
-    L = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
+    # Front-key + back-fill + rim, all with `centroid` as look-at target so any
+    # rendering scale gets even illumination on the visible side.
+    L = pyrender.DirectionalLight(color=np.ones(3), intensity=4.0)
     pscene.add(L, pose=look_at(centroid + np.array([extent, extent, extent]), centroid))
-    L2 = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
+    L2 = pyrender.DirectionalLight(color=np.ones(3), intensity=2.5)
     pscene.add(L2, pose=look_at(centroid + np.array([-extent, -extent, 0.5 * extent]), centroid))
+    L3 = pyrender.DirectionalLight(color=np.ones(3), intensity=1.5)
+    pscene.add(L3, pose=look_at(centroid + np.array([0.0, -0.5 * extent, -extent]), centroid))
 
 
 def render(pscene: pyrender.Scene, width: int, height: int) -> np.ndarray:
@@ -137,10 +196,35 @@ def annotate(img: np.ndarray, label: str) -> np.ndarray:
     h, w = img.shape[:2]
     pim = Image.fromarray(img)
     draw = ImageDraw.Draw(pim)
-    bar_h = 22
+    # Font size grows with panel height so 4K-style panels get readable labels.
+    font_size = max(14, int(round(h * 0.06)))
+    bar_h = font_size + 12
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype("arial.ttf", font_size)
+    except Exception:
+        font = None
     draw.rectangle([0, h - bar_h, w, h], fill=(0, 0, 0))
-    draw.text((6, h - bar_h + 4), label, fill=(255, 255, 255))
+    draw.text((8, h - bar_h + 5), label, fill=(255, 255, 255), font=font)
     return np.array(pim)
+
+
+def _shorten_label(name: str) -> str:
+    """object_002_appliance_home_appliance -> 'appliance'."""
+    s = name
+    for prefix in ("object_",):
+        if s.startswith(prefix):
+            rest = s[len(prefix):]
+            # rest = "002_appliance_home_appliance"
+            parts = rest.split("_", 1)
+            if len(parts) == 2:
+                cls = parts[1]
+                # collapse duplicate-like suffix "home_appliance" -> keep first word
+                cls = cls.split("_")[0]
+                return f"obj{parts[0]} {cls}"
+    if s.startswith("background_"):
+        return s[len("background_"):]
+    return s
 
 
 def make_grid(images: list[np.ndarray], cols: int, pad: int = 6) -> np.ndarray:
@@ -169,10 +253,24 @@ def render_grid(
     height: int,
     cols: int,
     input_image: np.ndarray | None,
+    cam_dist: float = 0.0,
+    cam_elev: float = 0.0,
+    cam_azim: float = 0.0,
+    bg_path: Path | None = None,
 ) -> np.ndarray:
-    # GLB world matches OpenGL camera convention: camera at origin looks -z.
-    cam_pose = input_camera_pose(roll_deg=roll_deg, pitch_deg=pitch_deg)
+    cam_pose = input_camera_pose(
+        roll_deg=roll_deg, pitch_deg=pitch_deg,
+        dist=cam_dist, elev_deg=cam_elev, azim_deg=cam_azim,
+    )
     aspect = width / height
+
+    # When a photoreal background is provided, skip the procedural floor/wall
+    # planes so we don't double-render the kitchen — the inpainted background
+    # already contains those.
+    skip_planes = bg_path is not None and bg_path.exists()
+
+    def _composite_label(raw: np.ndarray) -> np.ndarray:
+        return composite_over_background(raw, bg_path) if skip_planes else raw
 
     panels: list[np.ndarray] = []
 
@@ -180,18 +278,20 @@ def render_grid(
         ref = _fit_panel(input_image, width, height)
         panels.append(annotate(ref, "INPUT (reference)"))
 
-    pscene = build_pyrender_scene(items)
+    pscene = build_pyrender_scene(items, skip_background_planes=skip_planes)
     cam = pyrender.PerspectiveCamera(yfov=math.radians(vfov_deg), aspectRatio=aspect)
     pscene.add(cam, pose=cam_pose)
     add_lights(pscene, centroid, extent)
-    panels.append(annotate(render(pscene, width, height), "FULL (reproj)"))
+    panels.append(annotate(_composite_label(render(pscene, width, height)), "FULL (3D objects on photoreal bg)"))
 
     for name, _ in items:
-        pscene = build_pyrender_scene(items, exclude={name})
+        if skip_planes and "background_" in name:
+            continue  # nothing useful to show by removing a plane we didn't draw
+        pscene = build_pyrender_scene(items, exclude={name}, skip_background_planes=skip_planes)
         cam = pyrender.PerspectiveCamera(yfov=math.radians(vfov_deg), aspectRatio=aspect)
         pscene.add(cam, pose=cam_pose)
         add_lights(pscene, centroid, extent)
-        panels.append(annotate(render(pscene, width, height), f"- {name}"))
+        panels.append(annotate(_composite_label(render(pscene, width, height)), f"removed: {_shorten_label(name)}"))
 
     return make_grid(panels, cols=cols)
 
@@ -206,6 +306,79 @@ def _fit_panel(img: np.ndarray, width: int, height: int) -> np.ndarray:
     canvas = Image.new("RGB", (width, height), (255, 255, 255))
     canvas.paste(pim_r, ((width - nw) // 2, (height - nh) // 2))
     return np.array(canvas)
+
+
+def render_wiggle_gif(
+    items: list[tuple[str, trimesh.Trimesh]],
+    centroid: np.ndarray,
+    extent: float,
+    vfov_deg: float,
+    roll_deg: float,
+    pitch_deg: float,
+    width: int,
+    height: int,
+    frames: int,
+    cam_dist: float = 0.0,
+    cam_elev: float = 0.0,
+    cam_azim: float = 0.0,
+    bg_path: Path | None = None,
+) -> list[np.ndarray]:
+    """Each non-background object oscillates independently along a random
+    direction to visually prove object-level rigid-body decomposition.
+    Camera stays at the input pose so the viewer can compare against the
+    reference image.
+    """
+    cam_pose = input_camera_pose(
+        roll_deg=roll_deg, pitch_deg=pitch_deg,
+        dist=cam_dist, elev_deg=cam_elev, azim_deg=cam_azim,
+    )
+    aspect = width / height
+    rng = np.random.RandomState(42)
+
+    movable_names = [n for n, _ in items if "background" not in n]
+    dirs = rng.randn(len(movable_names), 3)
+    dirs[:, 1] = 0.0  # keep wiggle horizontal so objects don't sink through floor
+    norms = np.linalg.norm(dirs, axis=1, keepdims=True)
+    dirs = dirs / np.maximum(norms, 1e-6)
+    phases = rng.uniform(0, 2 * math.pi, size=len(movable_names))
+    name_to_dir = dict(zip(movable_names, zip(dirs, phases)))
+
+    # Wiggle amplitude scaled to typical object size, not whole-scene extent.
+    # extent includes the wide floor/wall planes, so 0.18*extent was ~3x bigger
+    # than the largest movable. Pick a fraction of the smallest non-background
+    # object so even small objects show clearly without giant ones flying.
+    movable_extents = []
+    for n, g in items:
+        if "background" in n:
+            continue
+        bb = g.vertices.max(0) - g.vertices.min(0)
+        movable_extents.append(float(np.linalg.norm(bb)))
+    base = min(movable_extents) if movable_extents else extent
+    amp = 0.6 * base
+
+    skip_planes = bg_path is not None and bg_path.exists()
+
+    frames_rgb: list[np.ndarray] = []
+    for f in range(frames):
+        t = 2.0 * math.pi * f / frames
+        pscene = pyrender.Scene(bg_color=(1.0, 1.0, 1.0), ambient_light=[0.70, 0.70, 0.70])
+        for name, geom in items:
+            if skip_planes and "background_" in name:
+                continue
+            if name not in name_to_dir:
+                pscene.add(pyrender.Mesh.from_trimesh(geom, smooth=False), name=name)
+                continue
+            d, phase = name_to_dir[name]
+            offset = d * (amp * math.sin(t + phase))
+            geom_off = geom.copy()
+            geom_off.vertices = geom.vertices + offset[None, :]
+            pscene.add(pyrender.Mesh.from_trimesh(geom_off, smooth=False), name=name)
+        cam = pyrender.PerspectiveCamera(yfov=math.radians(vfov_deg), aspectRatio=aspect)
+        pscene.add(cam, pose=cam_pose)
+        add_lights(pscene, centroid, extent)
+        raw = render(pscene, width, height)
+        frames_rgb.append(composite_over_background(raw, bg_path) if skip_planes else raw)
+    return frames_rgb
 
 
 def render_orbit_gif(
@@ -244,6 +417,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--glb", default=str(_default_glb()))
     ap.add_argument("--camera-json", default=str(_default_camera_json()))
+    ap.add_argument("--fitted-camera-json", default=None,
+                    help="render_meta.json from fitted_transform; if present uses the optimized look_at camera instead of camera-at-origin.")
+    ap.add_argument("--background", default=str(PROJECT_ROOT / "output" / "background_inpaint" / "clean_background.png"),
+                    help="Photoreal LaMa-inpainted background to composite under the rendered 3D objects. Pass empty string to disable.")
     ap.add_argument("--input-image", default=str(_default_image()))
     ap.add_argument("--out-dir", default=str(_default_out_dir()))
     ap.add_argument("--width", type=int, default=480)
@@ -301,12 +478,42 @@ def main() -> None:
     else:
         print(f"warning: camera json not found, using default vfov={vfov_deg}")
 
+    cam_dist = 0.0
+    cam_elev = 0.0
+    cam_azim = 0.0
+    fitted_cam_path = (
+        Path(args.fitted_camera_json).resolve() if args.fitted_camera_json
+        else _default_fitted_camera_json(stem)
+    )
+    if fitted_cam_path.exists():
+        with open(fitted_cam_path, "r", encoding="utf-8") as f:
+            rm = json.load(f)
+        fc = rm.get("camera", {})
+        cam_dist = float(fc.get("dist", 0.0))
+        cam_elev = float(fc.get("elev", 0.0))
+        cam_azim = float(fc.get("azim", 0.0))
+        cam_fov = fc.get("fov")
+        if cam_fov is not None:
+            vfov_deg = float(cam_fov)
+            roll_deg = 0.0
+            pitch_deg = 0.0
+        print(f"using fitted camera: dist={cam_dist:.3f}, elev={cam_elev:.2f}, azim={cam_azim:.2f}, fov={vfov_deg:.2f}")
+
     print(f"vfov={vfov_deg:.2f}, roll={roll_deg:.2f}, pitch={pitch_deg:.2f}, render={width}x{height}")
+
+    bg_path = Path(args.background).resolve() if args.background else None
+    if bg_path is not None and not bg_path.exists():
+        print(f"warning: background image not found at {bg_path}; using procedural floor/wall planes")
+        bg_path = None
+    elif bg_path is not None:
+        print(f"using photoreal background: {bg_path.name}")
 
     print("rendering grid (input-camera view, each object removed once)...")
     grid = render_grid(
         items, centroid, extent, vfov_deg, roll_deg, pitch_deg,
         width, height, args.grid_cols, input_image,
+        cam_dist=cam_dist, cam_elev=cam_elev, cam_azim=cam_azim,
+        bg_path=bg_path,
     )
     grid_path = out_dir / "grid.png"
     Image.fromarray(grid).save(grid_path)
@@ -317,6 +524,17 @@ def main() -> None:
     gif_path = out_dir / "motion.gif"
     imageio.mimsave(gif_path, frames, duration=0.06, loop=0)
     print(f"saved {gif_path}")
+
+    print(f"rendering wiggle.gif ({args.frames} frames, per-object independent motion)...")
+    wig_frames = render_wiggle_gif(
+        items, centroid, extent, vfov_deg, roll_deg, pitch_deg,
+        width, height, args.frames,
+        cam_dist=cam_dist, cam_elev=cam_elev, cam_azim=cam_azim,
+        bg_path=bg_path,
+    )
+    wig_path = out_dir / "wiggle.gif"
+    imageio.mimsave(wig_path, wig_frames, duration=0.06, loop=0)
+    print(f"saved {wig_path}")
 
 
 if __name__ == "__main__":

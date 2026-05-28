@@ -38,6 +38,7 @@ from scripts.verify_motion import (  # noqa: E402
     input_camera_pose,
     load_objects,
     render as render_pyscene,
+    _default_fitted_camera_json,
 )
 
 
@@ -75,6 +76,10 @@ def render_input_view(
     vfov_deg: float,
     roll_deg: float,
     pitch_deg: float,
+    cam_dist: float = 0.0,
+    cam_elev: float = 0.0,
+    cam_azim: float = 0.0,
+    skip_background_planes: bool = False,
 ) -> np.ndarray:
     all_verts = np.concatenate([g.vertices for _, g in items], axis=0)
     centroid = all_verts.mean(axis=0)
@@ -82,9 +87,12 @@ def render_input_view(
     bb_max = all_verts.max(axis=0)
     extent = float(np.linalg.norm(bb_max - bb_min))
 
-    cam_pose = input_camera_pose(roll_deg=roll_deg, pitch_deg=pitch_deg)
+    cam_pose = input_camera_pose(
+        roll_deg=roll_deg, pitch_deg=pitch_deg,
+        dist=cam_dist, elev_deg=cam_elev, azim_deg=cam_azim,
+    )
     aspect = width / height
-    pscene = build_pyrender_scene(items)
+    pscene = build_pyrender_scene(items, skip_background_planes=skip_background_planes)
     cam = pyrender.PerspectiveCamera(yfov=math.radians(vfov_deg), aspectRatio=aspect)
     pscene.add(cam, pose=cam_pose)
     add_lights(pscene, centroid, extent)
@@ -181,6 +189,22 @@ def main() -> None:
         roll_deg = float(pf.get("pred_roll", 0.0))
         pitch_deg = float(pf.get("pred_pitch", 0.0))
 
+    # Prefer the camera that fitted_transform actually used (its render_meta).
+    cam_dist, cam_elev, cam_azim = 0.0, 0.0, 0.0
+    fitted_cam_path = _default_fitted_camera_json(image_path.stem)
+    if fitted_cam_path.exists():
+        with open(fitted_cam_path, "r", encoding="utf-8") as f:
+            rm = json.load(f)
+        fc = rm.get("camera", {})
+        cam_dist = float(fc.get("dist", 0.0))
+        cam_elev = float(fc.get("elev", 0.0))
+        cam_azim = float(fc.get("azim", 0.0))
+        if "fov" in fc:
+            vfov_deg = float(fc["fov"])
+            roll_deg = 0.0
+            pitch_deg = 0.0
+        print(f"using fitted camera: dist={cam_dist:.3f} elev={cam_elev:.2f} azim={cam_azim:.2f} fov={vfov_deg:.2f}")
+
     input_rgb = np.array(Image.open(image_path).convert("RGB"))
     ih, iw = input_rgb.shape[:2]
 
@@ -189,7 +213,16 @@ def main() -> None:
     print(f"render res {w}x{h} (input {iw}x{ih})")
     print(f"vfov={vfov_deg:.2f}, roll={roll_deg:.2f}, pitch={pitch_deg:.2f}")
 
-    render_rgb = render_input_view(items, w, h, vfov_deg, roll_deg, pitch_deg)
+    bg_path = PROJECT_ROOT / "output" / "background_inpaint" / "clean_background.png"
+    use_bg = bg_path.exists()
+    render_rgb = render_input_view(
+        items, w, h, vfov_deg, roll_deg, pitch_deg,
+        cam_dist=cam_dist, cam_elev=cam_elev, cam_azim=cam_azim,
+        skip_background_planes=use_bg,
+    )
+    if use_bg:
+        from scripts.verify_motion import composite_over_background  # noqa: E402
+        render_rgb = composite_over_background(render_rgb, bg_path)
 
     image_stem = image_path.stem
     run_out_dir = out_dir / image_stem

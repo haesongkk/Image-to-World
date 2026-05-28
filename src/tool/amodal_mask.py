@@ -126,8 +126,8 @@ def make_amodal_masks() -> None:
     out_dir = AMODAL_COMPLETION_OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    mask_files = sorted(src_dir.glob("object_*_mask.npy"))
-    if not mask_files:
+    mask_files_all = sorted(src_dir.glob("object_*_mask.npy"))
+    if not mask_files_all:
         raise RuntimeError(f"No visible masks found in: {src_dir}")
 
     # Load source image (the input that was actually segmented).
@@ -139,6 +139,25 @@ def make_amodal_masks() -> None:
     if not src_img_path.is_absolute():
         src_img_path = src_img_path.resolve()
     source_rgb = np.array(Image.open(src_img_path).convert("RGB"))
+
+    # Keep only masks that match the current input image resolution.
+    H, W = source_rgb.shape[:2]
+    mask_files: list[Path] = []
+    for mp in mask_files_all:
+        m0 = np.load(mp)
+        if m0.ndim == 3:
+            m0 = m0[..., 0]
+        if m0.shape[:2] == (H, W):
+            mask_files.append(mp)
+    if not mask_files:
+        raise RuntimeError(
+            f"No masks matching source resolution ({H}x{W}) in: {src_dir}"
+        )
+    if len(mask_files) != len(mask_files_all):
+        print(
+            "amodal_mask: filtered stale masks by resolution "
+            f"({len(mask_files)} / {len(mask_files_all)} kept)"
+        )
 
     # Load all visible masks once so we can compute per-object occluder masks.
     visible_masks: list[np.ndarray] = []

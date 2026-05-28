@@ -9,6 +9,7 @@ def parse_args():
         "instance_segmentation",
         "mask_postprocess",
         "amodal_completion",
+        "background_inpaint",
         "crops_generation",
         "mesh_generation",
         "mesh_remesh",

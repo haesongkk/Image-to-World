@@ -21,6 +21,7 @@ CAMERA_ESTIMATION_OUTPUT_DIR = OUTPUT_DIR / "camera_estimation"
 SCENE_PRECOMPUTE_OUTPUT_DIR = OUTPUT_DIR / "scene_precompute"
 FITTED_TRANSFORM_OUTPUT_DIR = OUTPUT_DIR / "fitted_transform"
 SCENE_ASSEMBLY_OUTPUT_DIR = OUTPUT_DIR / "scene_assembly"
+BACKGROUND_INPAINT_OUTPUT_DIR = OUTPUT_DIR / "background_inpaint"
 
 RAW_IMAGE_NAME = "raw_image.jpg"
 

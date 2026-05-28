@@ -11,7 +11,11 @@ import torch
 import torch.nn.functional as F
 import trimesh
 from src.config import CAMERA_ESTIMATION_OUTPUT_DIR, MASK_POSTPROCESS_OUTPUT_DIR, MESH_GENERATION_OUTPUT_DIR, SCENE_PRECOMPUTE_OUTPUT_DIR
-from src.tool.stuff_filter import compute_keep_indices
+from src.tool.stuff_filter import (
+    class_from_filename,
+    compute_keep_indices,
+    load_floor_resting_keywords,
+)
 
 from pytorch3d.renderer import (
     BlendParams,
@@ -50,6 +54,12 @@ DEFAULTS = {
     "camera_prefit_w_dist": 0.01,
     "camera_prefit_w_angle": 0.002,
     "camera_prefit_w_fov": 0.002,
+    # Floor-contact soft constraint (P1-4c MVP): pull floating objects down
+    # to floor_y. One-sided relu² penalty so objects already at/below the
+    # floor see no force. λ=0.05 was 50× too small (gave penalty ~0.02 vs
+    # sil_loss ~1.2) — transforms barely moved. Bumped to 1.0 so a ~0.7m
+    # gap gives penalty ~0.5 (comparable to sil_loss).
+    "contact_lambda": 1.0,
 }
 
 
@@ -271,6 +281,16 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
         init_azim = float(DEFAULTS["camera_azim"]) + (0.2 * pf_roll)
         init_dist = max(2.0, min(7.0, float(DEFAULTS["camera_dist"]) / pf_rel_focal))
 
+    # Scene-scale-aware override: if all raw_t magnitudes are small (close-up
+    # scene like a kitchen counter), the heuristic above starts the camera
+    # too far back, leaving the silhouette tiny in the 160×160 render and
+    # gradients vanishing. Use 2× the mean translation magnitude as init_dist.
+    raw_t_mag = float(torch.norm(raw_t, dim=1).mean().item())
+    scene_scaled_dist = max(0.8, min(7.0, 2.0 * raw_t_mag))
+    if scene_scaled_dist < init_dist:
+        print(f"init_dist adjust: {init_dist:.2f} -> {scene_scaled_dist:.2f} (raw_t_mean={raw_t_mag:.3f})")
+        init_dist = scene_scaled_dist
+
     def _make_camera(dist: torch.Tensor, elev: torch.Tensor, azim: torch.Tensor, fov: torch.Tensor) -> FoVPerspectiveCameras:
         R, T = look_at_view_transform(dist=dist, elev=elev, azim=azim, device=device)
         return FoVPerspectiveCameras(device=device, R=R, T=T, fov=fov)
@@ -314,7 +334,7 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
     cam_opt = torch.optim.Adam([log_dist, elev_p, azim_p, fov_p], lr=float(DEFAULTS["camera_prefit_lr"]))
     for _ in range(max(int(DEFAULTS["camera_prefit_steps"]), 0)):
         cam_opt.zero_grad(set_to_none=True)
-        dist_cur = torch.exp(log_dist).clamp(1.5, 15.0)
+        dist_cur = torch.exp(log_dist).clamp(0.6, 15.0)
         elev_cur = elev_p.clamp(-45.0, 45.0)
         azim_cur = azim_p.clamp(-180.0, 180.0)
         fov_cur = fov_p.clamp(30.0, 90.0)
@@ -336,7 +356,7 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
         cam_opt.step()
 
     with torch.no_grad():
-        dist_cur = torch.exp(log_dist).clamp(1.5, 15.0)
+        dist_cur = torch.exp(log_dist).clamp(0.6, 15.0)
         elev_cur = elev_p.clamp(-45.0, 45.0)
         azim_cur = azim_p.clamp(-180.0, 180.0)
         fov_cur = fov_p.clamp(30.0, 90.0)
@@ -385,6 +405,37 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
     with open(output_dir / "heading_search.json", "w", encoding="utf-8") as f:
         json.dump({"offsets_tried_deg": heading_offsets_deg, "per_object": heading_log}, f, indent=2)
 
+    # Floor-contact soft constraint setup.
+    # _S_TO_P maps storage z (up) → pytorch3d y (up), so floor_y in the
+    # optimization frame equals floor_z in storage frame.
+    floor_y: float | None = None
+    contact_lambda = float(DEFAULTS["contact_lambda"])
+    try:
+        from src.tool.floor_plane import fit_floor
+        _fit = fit_floor()
+        if _fit is not None:
+            floor_y = float(_fit["floor_z"])
+            print(f"[floor-contact] floor_y={floor_y:.3f} lambda={contact_lambda}")
+        else:
+            print("[floor-contact] disabled: no floor pointcloud found")
+    except Exception as exc:
+        print(f"[floor-contact] disabled: {exc}")
+
+    # Per-class gate: only apply contact penalty to objects whose class is in
+    # the floor-resting list (couch/chair/table/...). Pillows/plants/cups rest
+    # on other objects, not the floor — pulling them down breaks silhouettes.
+    floor_resting_kws = load_floor_resting_keywords()
+    obj_classes = [class_from_filename(mp.stem) for mp in mask_paths]
+    is_floor_resting = [
+        any(kw in c for kw in floor_resting_kws) for c in obj_classes
+    ]
+    if floor_y is not None:
+        contact_on = [i for i, b in enumerate(is_floor_resting) if b]
+        print(
+            f"[floor-contact] applying to {len(contact_on)}/{n} objects "
+            f"(classes: {sorted(set(c for c, b in zip(obj_classes, is_floor_resting) if b))})"
+        )
+
     total_steps = int(DEFAULTS["steps"])
     total_loss_ema: float | None = None
     early_stop_warmup = max(int(DEFAULTS["early_stop_warmup_steps"]), 0)
@@ -400,7 +451,8 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
             int(DEFAULTS["faces_pp"]),
         )
 
-        meshes, losses = [], []
+        meshes, losses, contact_losses = [], [], []
+        per_obj_ymin: list[float] = []
         for i in range(n):
             s = raw_s[i] * torch.exp(torch.clamp(dls[i], -0.7, 0.7))  # ~0.5x..2x
             r = raw_r[i] + torch.clamp(dr[i], -90.0, 90.0)
@@ -413,17 +465,35 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
             obj_loss = F.binary_cross_entropy(alpha, targets[i]) + _dice_loss(alpha, targets[i])
             if torch.isfinite(obj_loss):
                 losses.append(obj_loss)
+            if floor_y is not None and is_floor_resting[i]:
+                y_min = vw[:, 1].min()
+                contact_losses.append(F.relu(y_min - floor_y) ** 2)
+                if step == 0:
+                    per_obj_ymin.append(float(y_min.detach().item()))
+
+        if step == 0 and floor_y is not None and per_obj_ymin:
+            above = sum(1 for v in per_obj_ymin if v > floor_y)
+            print(
+                f"[floor-contact] step0 floor_y={floor_y:.3f} "
+                f"n_above={above}/{len(per_obj_ymin)} "
+                f"ymin_range=[{min(per_obj_ymin):.2f}, {max(per_obj_ymin):.2f}]"
+            )
 
         if not losses:
             print(f"[skip] step={step} all per-object losses non-finite")
             continue
 
         sil_loss = torch.stack(losses).mean()
+        contact_loss = (
+            torch.stack(contact_losses).mean()
+            if contact_losses
+            else torch.tensor(0.0, device=device)
+        )
 
         scene_mesh = join_meshes_as_scene(meshes)
         alpha_scene = torch.clamp(renderer(scene_mesh)[0, ..., 3], 0.0, 1.0)
         reg = 0.05 * (dt ** 2).mean() + 0.01 * (dls ** 2).mean() + 0.0005 * (dr ** 2).mean()
-        loss = sil_loss + reg
+        loss = sil_loss + reg + contact_lambda * contact_loss
 
         if not torch.isfinite(loss):
             print(f"[skip] step={step} total loss non-finite ({float(loss.detach().item())})")
@@ -453,6 +523,12 @@ def run(project_root: str, image_path: str, run_name: str = "simple") -> dict:
             alpha_np = alpha_vis.detach().cpu().numpy().astype(np.float32)
             target_np = target_union.detach().cpu().numpy().astype(np.float32)
             _save_gray(step_dir / f"render_step_{step:04d}_loss_{total_loss_value:.6f}.png", alpha_np)
+            if floor_y is not None:
+                print(
+                    f"[loss] step={step:03d} sil={float(sil_loss.detach().item()):.4f} "
+                    f"contact={float(contact_loss.detach().item()):.4f} "
+                    f"total={total_loss_value:.4f}"
+                )
 
 
         loss.backward()
