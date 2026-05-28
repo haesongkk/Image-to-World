@@ -6,7 +6,14 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 import pycocotools.mask as mask_util
-from src.config import CROPS_GENERATION_OUTPUT_DIR, INSTANCE_SEGMENTATION_OUTPUT_DIR, PROMPTING_OUTPUT_DIR, THIRD_PARTY_DIR
+from src.config import (
+    AMODAL_COMPLETION_OUTPUT_DIR,
+    CROPS_GENERATION_OUTPUT_DIR,
+    INSTANCE_SEGMENTATION_OUTPUT_DIR,
+    MASK_POSTPROCESS_OUTPUT_DIR,
+    PROMPTING_OUTPUT_DIR,
+    THIRD_PARTY_DIR,
+)
 from src.external.runner import run_external_command
 
 
@@ -97,19 +104,45 @@ def run_groundedsam2_crop_generation():
     os.makedirs(crops_dir, exist_ok=True)
 
     annotations = infer_results.get("annotations", [])
+
+    # Prefer amodal masks (from amodal_completion stage) for cropping; this
+    # gives Hunyuan3D-2 a tighter bbox of the *full* object (including
+    # mildly occluded extension) rather than just the visible piece.
+    # Falls back to visible mask from instance_segmentation JSON.
+    amodal_available = AMODAL_COMPLETION_OUTPUT_DIR.exists() and any(
+        AMODAL_COMPLETION_OUTPUT_DIR.glob("object_*_amodal_mask.npy")
+    )
+    if amodal_available:
+        print("crops_generation: using amodal masks for bbox")
+    else:
+        print("crops_generation: amodal masks not found, using visible masks")
+
     for idx, ann in enumerate(annotations):
         class_name = str(ann.get("class_name", "object")).strip() or "object"
         safe_class_name = re.sub(r"[^0-9A-Za-z_-]+", "_", class_name).strip("_") or "object"
 
-        seg = ann.get("segmentation")
-        if not seg or "counts" not in seg or "size" not in seg:
-            continue
+        mask = None
+        if amodal_available:
+            # mask_postprocess names files like object_000_<class>_mask.npy;
+            # amodal_completion replaces _mask -> _amodal_mask.
+            visible_pattern = f"object_{idx:03d}_*_mask.npy"
+            matching = sorted(MASK_POSTPROCESS_OUTPUT_DIR.glob(visible_pattern))
+            if matching:
+                amodal_path = AMODAL_COMPLETION_OUTPUT_DIR / matching[0].name.replace("_mask.npy", "_amodal_mask.npy")
+                if amodal_path.exists():
+                    mask = np.load(amodal_path)
+                    if mask.ndim == 3:
+                        mask = mask[..., 0]
 
-        mask = mask_util.decode({"size": seg["size"], "counts": seg["counts"]})
         if mask is None:
-            continue
-        if mask.ndim == 3:
-            mask = mask[:, :, 0]
+            seg = ann.get("segmentation")
+            if not seg or "counts" not in seg or "size" not in seg:
+                continue
+            mask = mask_util.decode({"size": seg["size"], "counts": seg["counts"]})
+            if mask is None:
+                continue
+            if mask.ndim == 3:
+                mask = mask[:, :, 0]
 
         mask = (mask > 0).astype(np.uint8)
         ys, xs = np.where(mask > 0)

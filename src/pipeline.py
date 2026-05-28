@@ -5,6 +5,7 @@ from pathlib import Path
 import time
 
 from src.config import (
+    AMODAL_COMPLETION_OUTPUT_DIR,
     CAMERA_ESTIMATION_OUTPUT_DIR,
     CROPS_GENERATION_OUTPUT_DIR,
     DEPTH_ESTIMATION_OUTPUT_DIR,
@@ -25,6 +26,7 @@ from src.manifest import write_run_manifest
 from src.pipeline_dag import stage_deps_ready, stage_output_ready
 from src.pipeline_types import StageResult
 from src.preflight import run_preflight
+from src.stage.amodal_completion import run_amodal_completion
 from src.stage.camera_estimation import run_camera_estimation
 from src.stage.crops_generation import run_crops_generation
 from src.stage.depth_estimation import run_depth_estimation
@@ -41,8 +43,9 @@ from src.stage.scene_precompute import run_scene_precompute
 STAGES = (
     "prompting",
     "instance_segmentation",
-    "crops_generation",
     "mask_postprocess",
+    "amodal_completion",
+    "crops_generation",
     "mesh_generation",
     "mesh_remesh",
     "mesh_texturing",
@@ -57,8 +60,12 @@ def _stage_dependencies(input_image: Path) -> dict[str, list[Path]]:
     return {
         "prompting": [input_image],
         "instance_segmentation": [input_image, PROMPTING_OUTPUT_DIR / "text_prompt.txt"],
-        "crops_generation": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
         "mask_postprocess": [input_image, INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
+        "amodal_completion": [MASK_POSTPROCESS_OUTPUT_DIR / "mask_viz.png"],
+        "crops_generation": [
+            INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json",
+            AMODAL_COMPLETION_OUTPUT_DIR / "amodal_viz.png",
+        ],
         "mesh_generation": [CROPS_GENERATION_OUTPUT_DIR / "crops"],
         "mesh_remesh": [CROPS_GENERATION_OUTPUT_DIR / "crops"],
         "mesh_texturing": [CROPS_GENERATION_OUTPUT_DIR / "crops", MESH_REMESH_OUTPUT_DIR],
@@ -89,8 +96,9 @@ def _stage_output_candidates(input_image: Path) -> dict[str, list[Path]]:
     return {
         "prompting": [PROMPTING_OUTPUT_DIR / "text_prompt.txt"],
         "instance_segmentation": [INSTANCE_SEGMENTATION_OUTPUT_DIR / "grounded_sam2_hf_model_demo_results.json"],
-        "crops_generation": [CROPS_GENERATION_OUTPUT_DIR / "crops"],
         "mask_postprocess": [MASK_POSTPROCESS_OUTPUT_DIR / "mask_viz.png"],
+        "amodal_completion": [AMODAL_COMPLETION_OUTPUT_DIR / "amodal_viz.png"],
+        "crops_generation": [CROPS_GENERATION_OUTPUT_DIR / "crops"],
         "mesh_generation": [MESH_GENERATION_OUTPUT_DIR],
         "mesh_remesh": [MESH_REMESH_OUTPUT_DIR],
         "mesh_texturing": [MESH_TEXTURING_OUTPUT_DIR],
@@ -116,6 +124,8 @@ def _run_stage(stage: str, input_image: Path) -> StageResult:
         result = run_crops_generation()
     elif stage == "mask_postprocess":
         result = run_mask_postprocess(input_image)
+    elif stage == "amodal_completion":
+        result = run_amodal_completion(input_image)
     elif stage == "mesh_generation":
         result = run_mesh_generation()
     elif stage == "mesh_remesh":
