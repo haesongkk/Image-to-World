@@ -105,35 +105,65 @@ def run_groundedsam2_crop_generation():
 
     annotations = infer_results.get("annotations", [])
 
-    # Prefer amodal masks (from amodal_completion stage) for cropping; this
-    # gives Hunyuan3D-2 a tighter bbox of the *full* object (including
-    # mildly occluded extension) rather than just the visible piece.
-    # Falls back to visible mask from instance_segmentation JSON.
-    amodal_available = AMODAL_COMPLETION_OUTPUT_DIR.exists() and any(
+    # Prefer amodal RGB crops (LaMa-inpainted, from amodal_completion) — they
+    # have occluders replaced with plausible surroundings so Hunyuan3D-2 sees
+    # a "clean" object crop. Falls back to amodal-mask bbox, then to visible.
+    amodal_rgb_available = AMODAL_COMPLETION_OUTPUT_DIR.exists() and any(
+        AMODAL_COMPLETION_OUTPUT_DIR.glob("object_*_amodal_rgb.png")
+    )
+    amodal_mask_available = AMODAL_COMPLETION_OUTPUT_DIR.exists() and any(
         AMODAL_COMPLETION_OUTPUT_DIR.glob("object_*_amodal_mask.npy")
     )
-    if amodal_available:
-        print("crops_generation: using amodal masks for bbox")
+    if amodal_rgb_available:
+        print("crops_generation: using amodal RGB crops (LaMa-inpainted)")
+    elif amodal_mask_available:
+        print("crops_generation: using amodal mask bboxes (no RGB available)")
     else:
-        print("crops_generation: amodal masks not found, using visible masks")
+        print("crops_generation: amodal not available, using visible masks")
 
     for idx, ann in enumerate(annotations):
         class_name = str(ann.get("class_name", "object")).strip() or "object"
         safe_class_name = re.sub(r"[^0-9A-Za-z_-]+", "_", class_name).strip("_") or "object"
 
-        mask = None
-        if amodal_available:
-            # mask_postprocess names files like object_000_<class>_mask.npy;
-            # amodal_completion replaces _mask -> _amodal_mask.
+        score_val = ann.get("score", 0.0)
+        if isinstance(score_val, list):
+            score_val = score_val[0] if score_val else 0.0
+        try:
+            score_str = f"{float(score_val):.3f}"
+        except (TypeError, ValueError):
+            score_str = "0.000"
+
+        out_name = f"{idx:03d}_{safe_class_name}_{score_str}.png"
+        out_path = crops_dir / out_name
+
+        # Path 1: Use LaMa-inpainted amodal RGB if available.
+        if amodal_rgb_available:
             visible_pattern = f"object_{idx:03d}_*_mask.npy"
             matching = sorted(MASK_POSTPROCESS_OUTPUT_DIR.glob(visible_pattern))
             if matching:
-                amodal_path = AMODAL_COMPLETION_OUTPUT_DIR / matching[0].name.replace("_mask.npy", "_amodal_mask.npy")
+                amodal_rgb_path = AMODAL_COMPLETION_OUTPUT_DIR / matching[0].name.replace(
+                    "_mask.npy", "_amodal_rgb.png"
+                )
+                if amodal_rgb_path.exists():
+                    # amodal_rgb is already a padded bbox crop, save directly.
+                    Image.open(amodal_rgb_path).convert("RGB").save(out_path)
+                    continue
+
+        # Path 2: Use amodal mask bbox on source RGB.
+        mask = None
+        if amodal_mask_available:
+            visible_pattern = f"object_{idx:03d}_*_mask.npy"
+            matching = sorted(MASK_POSTPROCESS_OUTPUT_DIR.glob(visible_pattern))
+            if matching:
+                amodal_path = AMODAL_COMPLETION_OUTPUT_DIR / matching[0].name.replace(
+                    "_mask.npy", "_amodal_mask.npy"
+                )
                 if amodal_path.exists():
                     mask = np.load(amodal_path)
                     if mask.ndim == 3:
                         mask = mask[..., 0]
 
+        # Path 3: fallback to JSON visible segmentation.
         if mask is None:
             seg = ann.get("segmentation")
             if not seg or "counts" not in seg or "size" not in seg:
@@ -153,15 +183,4 @@ def run_groundedsam2_crop_generation():
         x_min, x_max = int(xs.min()), int(xs.max())
 
         crop = source_arr[y_min : y_max + 1, x_min : x_max + 1]
-
-        score_val = ann.get("score", 0.0)
-        if isinstance(score_val, list):
-            score_val = score_val[0] if score_val else 0.0
-        try:
-            score_str = f"{float(score_val):.3f}"
-        except (TypeError, ValueError):
-            score_str = "0.000"
-
-        out_name = f"{idx:03d}_{safe_class_name}_{score_str}.png"
-        out_path = crops_dir / out_name
         Image.fromarray(crop, mode="RGB").save(out_path)

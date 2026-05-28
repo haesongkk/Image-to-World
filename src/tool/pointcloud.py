@@ -25,15 +25,19 @@ def make_pointcloud(image_path: Path):
     with open(camera_intrinsics_path, "r", encoding="utf-8") as f:
         intrinsics = json.load(f)
 
-    rel_focal = float(intrinsics["pred_rel_focal"])
     rel_cx = float(intrinsics["pred_rel_cx"])
     rel_cy = float(intrinsics["pred_rel_cy"])
     roll_deg = float(intrinsics["pred_roll"])
     pitch_deg = float(intrinsics["pred_pitch"])
     vfov_deg = float(intrinsics.get("pred_general_vfov", intrinsics["pred_vfov"]))
 
+    # Square pixels: fx == fy, both derived from vfov + image height.
+    # NOTE: prior code multiplied fx by `pred_rel_focal` which made fx half
+    # the correct value, inflating horizontal world coords ~2x. The couch
+    # `scale.y=13m` symptom came from this. PerspectiveFields' rel_focal /
+    # vfov outputs disagree, and vfov is the more directly usable signal.
     fy = (h * 0.5) / math.tan(math.radians(vfov_deg) * 0.5)
-    fx = fy * rel_focal
+    fx = fy
     cx = w * ( 0.5 + rel_cx )
     cy = h * ( 0.5 + rel_cy )
 
